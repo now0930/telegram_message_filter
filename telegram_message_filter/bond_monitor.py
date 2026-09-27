@@ -160,11 +160,20 @@ class BondMonitor:
                 bonds = [{'isin': 'MOCK', 'name': '예시회사채', 'issuer': '예시회사', 'rating': '테스트'}]
             else:
                 bonds = json.loads(Path(os.getenv('BOND_WATCHLIST_PATH', 'bond_watchlist.json')).read_text())
+            skipped = 0
+            failed = 0
             for bond in bonds:
                 try:
                     await self.process(bond)
+                except (ValueError, requests.RequestException) as exc:
+                    # Illiquid/unsupported bonds are expected in a broad watchlist.
+                    skipped += 1
                 except Exception:
+                    failed += 1
                     LOG.exception('회사채 처리 실패: %s', bond.get('isin', 'unknown'))
+            if skipped or failed:
+                LOG.info('채권 조회 완료: 전체 %d개, 건너뜀 %d개, 예기치 않은 실패 %d개',
+                         len(bonds), skipped, failed)
 
     async def process(self, bond):
         if self.mock:
