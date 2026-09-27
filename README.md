@@ -153,6 +153,45 @@ docker compose logs -f telegram-filter
 
 `.env`의 채널 목록 변경도 `restart`만 하지 말고 `up -d --force-recreate`로 환경 변수를 다시 읽도록 합니다.
 
+### 새 디렉터리로 clone 후 재시작
+
+기존 실행 디렉터리를 보존한 채 새 버전을 받아 교체하려면 다음 순서로 실행합니다. `NEW` 디렉터리가 이미 있으면 다른 이름을 사용하세요.
+
+```sh
+set -e
+
+OLD=/home/now0930/telegram_message_filter
+NEW=/home/now0930/telegram_message_filter_next
+
+test ! -e "$NEW" || { echo "$NEW already exists" >&2; exit 1; }
+git clone https://github.com/now0930/telegram_message_filter.git "$NEW"
+git -C "$NEW" log -1 --oneline
+
+# 인증·세션·중복 기록·사용자 관심품목은 새 clone에 복사합니다.
+for f in .env telegram_session.session news_history.sqlite3 deal_notifications.sqlite3 deal_watchlist.json; do
+  if [ -e "$OLD/$f" ]; then
+    cp -a "$OLD/$f" "$NEW/telegram_message_filter/$f"
+  fi
+done
+
+docker compose \
+  -f "$OLD/docker-compose.yml" \
+  -f "$OLD/docker-compose.deals.yml" \
+  down
+
+cd "$NEW/telegram_message_filter"
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.deals.yml \
+  up -d --force-recreate telegram-filter
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.deals.yml \
+  logs -f --tail=100 telegram-filter
+```
+
+`git log`에서 원격에 푸시한 최신 커밋을 확인한 뒤 서비스를 시작하세요. `.env`, `*.session*`, `*.sqlite3`는 인증·운영 데이터이므로 clone만으로 복원되지 않습니다. 기존 컨테이너를 먼저 내린 뒤 새 디렉터리에서 시작해야 고정된 컨테이너 이름 충돌을 피할 수 있습니다.
+
 ## 당근 가격 알림 — 안드로이드 알림 연동
 
 공개 웹 검색은 지역 정보는 반환하지만 실매물 목록을 확인할 수 없어 수집기로 사용하지 않습니다. **안드로이드의 당근 키워드 알림을 인증된 웹훅으로 전달**하고, 명시적인 조건을 충족한 알림만 기존 Telegram 연결로 전송합니다. 휴대폰의 MacroDroid 설정이 필요하며, 설정 전에는 매물이 자동 수집되지 않습니다.
