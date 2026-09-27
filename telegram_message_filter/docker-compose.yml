@@ -11,8 +11,6 @@ services:
     networks:
       - ollama_network
     # APScheduler runs inside main.py and shares its single Telethon session.
-    environment:
-      BOND_MONITOR_ENABLED: ${BOND_MONITOR_ENABLED:-false}
     restart: unless-stopped
 
 networks:
