@@ -1,0 +1,17 @@
+services:
+  telegram-filter:
+    image: python:3.11-slim
+    container_name: telegram_filter_bot
+    volumes:
+      - ./:/app
+    working_dir: /app
+    env_file:
+      - .env
+    command: sh -c "pip install --no-cache-dir -r requirements.txt && python main.py"
+    networks:
+      - ollama_network
+    restart: unless-stopped
+
+networks:
+  ollama_network:
+    external: true
