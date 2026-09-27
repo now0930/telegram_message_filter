@@ -61,7 +61,7 @@ AI가 중요도·깊이·근거를 각각 0~5점으로 평가하고, 실제 전�
 Docker Compose와 Ollama가 필요합니다. Ollama에는 `hf.co/sky7350/Mica-v0.1-4B:Q5_K_M` 모델을 준비하세요. 기본 Compose는 외부 Docker 네트워크 `ollama_network`를 사용합니다. 이 네트워크가 있어야 하며, 필터 컨테이너에서 `OLLAMA_HOST`에 접근할 수 있어야 합니다.
 
 ```sh
-git clone https://github.com/now0930/telegram_message_filter.git
+git clone https://github.com/OWNER/REPOSITORY.git
 cd telegram_message_filter/telegram_message_filter
 cp .env.example .env
 ```
@@ -160,11 +160,11 @@ docker compose logs -f telegram-filter
 ```sh
 set -e
 
-OLD=/home/now0930/telegram_message_filter
-NEW=/home/now0930/telegram_message_filter_next
+OLD="$HOME/telegram_message_filter"
+NEW="$HOME/telegram_message_filter_next"
 
 test ! -e "$NEW" || { echo "$NEW already exists" >&2; exit 1; }
-git clone https://github.com/now0930/telegram_message_filter.git "$NEW"
+git clone https://github.com/OWNER/REPOSITORY.git "$NEW"
 git -C "$NEW" log -1 --oneline
 
 # 인증·세션·중복 기록·사용자 관심품목은 새 clone에 복사합니다.
@@ -192,7 +192,7 @@ docker compose \
 
 `git log`에서 원격에 푸시한 최신 커밋을 확인한 뒤 서비스를 시작하세요. `.env`, `*.session*`, `*.sqlite3`는 인증·운영 데이터이므로 clone만으로 복원되지 않습니다. 기존 컨테이너를 먼저 내린 뒤 새 디렉터리에서 시작해야 고정된 컨테이너 이름 충돌을 피할 수 있습니다.
 
-위 절차를 자동화하려면 저장소 루트에서 다음 스크립트를 사용합니다. 기본값은 기존 디렉터리 `/home/now0930/telegram_message_filter`, 새 디렉터리 `/home/now0930/telegram_message_filter_next`입니다. 새 디렉터리가 이미 있으면 중단하며 기존 디렉터리를 삭제하지 않습니다.
+위 절차를 자동화하려면 저장소 루트에서 다음 스크립트를 사용합니다. 기본값은 사용자의 홈 디렉터리 아래 `telegram_message_filter`와 `telegram_message_filter_next`입니다. 새 디렉터리가 이미 있으면 중단하며 기존 디렉터리를 삭제하지 않습니다.
 
 ```sh
 ./scripts/clone_restart.sh
@@ -202,8 +202,8 @@ docker compose \
 
 ```sh
 CLONE_RESTART_CONFIRM=YES \
-OLD_DIR=/home/now0930/telegram_message_filter \
-NEW_DIR=/home/now0930/telegram_message_filter_next \
+OLD_DIR="$HOME/telegram_message_filter" \
+NEW_DIR="$HOME/telegram_message_filter_next" \
 ./scripts/clone_restart.sh
 ```
 
@@ -213,17 +213,11 @@ NEW_DIR=/home/now0930/telegram_message_filter_next \
 
 관심 품목은 `telegram_message_filter/deal_watchlist.json`에서 편집합니다. 서버는 처리 시 설정을 다시 읽으므로 품목/가격 변경에 재시작은 필요하지 않습니다. 기본 `enabled: false`는 수신·판정만 하는 확인 모드입니다. `true`로 바꾸면 이후 조건을 통과한 새 알림을 Telegram에 전송합니다. 확인 모드에서 이미 처리한 알림은 소급 전송하지 않습니다.
 
-| 품목 | 직접 설정한 새제품 기준가 | 알림 상한 (50% 이하) |
-| --- | ---: | ---: |
-| 갤럭시 워치9 44mm | 510,000원 | 255,000원 |
-| 블루투스 스피커 | 200,000원 | 100,000원 |
-| ARM 기반 노트북 | 1,200,000원 | 600,000원 |
-
-지역은 **경기도 군포시 산본2동**이며 인접 동네를 자동 포함하지 않습니다. 스피커/노트북은 모델이 다양하므로 기준가가 실제 동일 모델 시세와 다를 수 있습니다. `name`, `reference_price`, `required_patterns`, `excluded_title_patterns`를 편집해 관심 모델을 구체화할 수 있습니다.
+지역·품목·가격은 각 운영자의 `deal_watchlist.json`에서 설정합니다. 공개 문서에는 실제 지역이나 개인별 가격을 기록하지 않습니다. 인접 지역은 자동으로 포함하지 않으며, 스피커·노트북처럼 모델이 다양한 품목은 기준가가 실제 동일 모델 시세와 다를 수 있습니다. `name`, `reference_price`, `required_patterns`, `excluded_title_patterns`를 편집해 관심 모델을 구체화할 수 있습니다.
 
 ### 판정과 한계
 
-알림 텍스트 자체에서 산본2동·판매 중·정확한 가격·모델·미개봉을 확인해야 합니다. 미사용/새상품만 적힌 글, 미개봉급, 개봉 후 미사용, 구매글, 예약금/보증금, 제외 모델/액세서리는 제외합니다. 상태나 가격이 생략된 실제 당근 알림은 `insufficient`로 기록되고 전송되지 않습니다. 알림의 형식은 아직 실제 휴대폰 샘플로 검증하지 않았으므로 연동 후 수신 결과를 확인해야 합니다. 필요한 정보가 원래 알림에 없다면 상세 매물 정보를 추가로 제공하는 방식이 필요합니다.
+알림 텍스트 자체에서 설정한 지역·판매 중·정확한 가격·모델·미개봉을 확인해야 합니다. 미사용/새상품만 적힌 글, 미개봉급, 개봉 후 미사용, 구매글, 예약금/보증금, 제외 모델/액세서리는 제외합니다. 상태나 가격이 생략된 실제 당근 알림은 `insufficient`로 기록되고 전송되지 않습니다. 알림의 형식은 아직 실제 휴대폰 샘플로 검증하지 않았으므로 연동 후 수신 결과를 확인해야 합니다. 필요한 정보가 원래 알림에 없다면 상세 매물 정보를 추가로 제공하는 방식이 필요합니다.
 
 - 가격은 사용자 지정 기준가입니다. 실시간 중고 거래 시세를 자동 조회하지 않습니다.
 - 미개봉과 판매 중 상태는 알림에 적힌 주장이지 실물/현재 상태를 직접 확인한 결과가 아닙니다.
@@ -255,8 +249,8 @@ docker compose -f docker-compose.yml -f docker-compose.deals.yml up -d --force-r
 
 현재 연결 주소:
 
-- `POST https://now0930.pe.kr/deals/notification`: 알림 수신
-- `GET https://now0930.pe.kr/deals/status`: 인증 후 상태 확인
+- `POST https://your-domain.example/deals/notification`: 알림 수신
+- `GET https://your-domain.example/deals/status`: 인증 후 상태 확인
 - 공통 헤더: `Authorization: Bearer <DEALS_WEBHOOK_TOKEN 값>`
 - 수신 추가 헤더: `X-Notification-App: com.towneers.www`
 - 수신 본문 형식: `Content-Type: text/plain; charset=utf-8`
@@ -265,7 +259,7 @@ docker compose -f docker-compose.yml -f docker-compose.deals.yml up -d --force-r
 
 ### 휴대폰 설정 (MacroDroid)
 
-1. 당근 앱에서 동네를 산본2동으로 설정하고 관심 키워드(갤럭시 워치9, 블루투스 스피커, ARM 노트북/스냅드래곤 노트북/맥북)를 등록합니다. 실제 알림 제공 범위/조건은 앱 설정을 확인하세요.
+1. 당근 앱에서 사용할 지역을 설정하고 관심 키워드를 등록합니다. 실제 알림 제공 범위/조건은 앱 설정을 확인하세요.
 2. MacroDroid를 설치하고 알림 접근 권한을 허용합니다.
 3. 새 매크로의 **알림 수신** 트리거에서 당근(`com.towneers.www`)만 선택하고, 실제 키워드 알림에 맞는 텍스트 필터를 설정합니다. 개인 채팅 알림을 함께 전달하지 마세요.
 4. **HTTP Request** 액션에서 위 수신 URL, POST, 헤더 3개를 설정합니다.
