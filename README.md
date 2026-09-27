@@ -245,3 +245,83 @@ MacroDroid 공식 문서: [알림 트리거](https://www.macrodroidforum.com/wik
 ```
 
 자동화 환경에서는 내용을 별도로 검토한 뒤 `PUSH_CONFIRM=YES ./scripts/safe_push.sh`를 사용하세요. 원격이 앞선 경우에는 스크립트가 중단되므로 먼저 `git pull --rebase` 결과를 확인해야 합니다.
+
+## 국내 회사채 급락 모니터
+
+`telegram_message_filter/bond_monitor.py`는 등록한 **장내 회사채**를 KIS API로 조회합니다. 전체 장외 회사채 시장 스캐너가 아니며, 종목코드·발행사·등급은 운영자가 확인해서 등록합니다. 주문은 실행하지 않습니다.
+
+- 전 거래일 대비 가격 -2% 이하 **또는** 수익률 +50bp 이상이면 감지합니다. 수익률 입력 단위는 %이며 4.5 → 5.0은 +50bp입니다.
+- 공식 일별 API에는 수익률 필드가 없어 가격은 일별 API, 수익률은 현재가 API의 `ernn_rate`를 사용합니다. 매일 16시 이후 관측한 수익률을 SQLite에 저장하고, 일별 API가 알려준 직전 거래일 관측치와 비교합니다. 최초 실행·누락일에는 수익률 비교 없이 가격 조건만 적용합니다. 관측 수익률은 공식 일별 확정 종가 수익률과 같다고 보장하지 않습니다.
+- 당일 데이터가 없거나 비교하는 두 거래일 중 거래량이 0이면 건너뜁니다. 휴일·거래 부진으로 인한 오래된 가격을 오늘의 급락으로 취급하지 않습니다.
+- 네이버 금융 뉴스 검색에서 발행사 이름이 제목에 있는 최근 3일 기사 최대 5개를 수집합니다. 3개 미만이면 확보한 기사만 사용합니다. 검색 차단·HTML 변경·날짜 확인 실패 시 뉴스 없이 감지 결과를 전달합니다.
+- Ollama temperature=0.0, 네 가지 분류만 수용합니다. 뉴스 부족·잘못된 출력·AI 장애는 `분류 보류`로 표시합니다. 헤드라인 분류는 원인 확정이 아닙니다.
+- 종목/거래일별 성공 발송을 DB에 기록합니다. 실패하면 다음 실행에 재시도합니다. 전송 직후 DB 저장 전에 종료되면 중복 가능성이 있습니다.
+
+### 설정 및 기존 서비스와 동시 실행
+
+실행 디렉터리에서 `cp bond_watchlist.example.json bond_watchlist.json` 후 실제 회사채 ISIN·발행사·등급을 넣습니다. 이 개인 설정은 Git에서 제외되며 단일 디렉터리 업데이트로 보존됩니다.
+
+`.env` 설정:
+
+```ini
+BOND_MONITOR_ENABLED=true
+KIS_APP_KEY=발급받은_앱키
+KIS_APP_SECRET=발급받은_앱시크릿
+BOND_WATCHLIST_PATH=bond_watchlist.json
+BOND_DB_PATH=bond_history.sqlite3
+BOND_HOUR=16
+BOND_MINUTE=10
+```
+
+KIS 실전 Open API 이용 신청이 필요합니다. 키는 서버 `.env`에만 저장합니다. 기존 Telegram 환경 변수와 `OLLAMA_HOST`, `OLLAMA_MODEL`을 재사용합니다. 기본 모델은 `hf.co/sky7350/Mica-v0.1-4B:Q5_K_M`입니다.
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.deals.yml up -d --force-recreate telegram-filter
+docker logs -f --tail=100 telegram_filter_bot
+```
+
+**기존 서비스의 단일 Telethon 연결에 APScheduler 비동기 작업을 추가하는 방식**입니다. 별도 서비스에서 같은 `telegram_session.session`을 동시에 열거나 세션 파일을 복제해 실행하지 마세요. 기본 월~금 16:10 한국 시각에 실행하며 시작 즉시 실행하지 않습니다. KIS/requests/BeautifulSoup의 동기 작업은 스레드로 분리합니다. APScheduler의 중복 실행은 금지됩니다.
+
+### 발송 없는 테스트와 독립 실행
+
+```sh
+# 가상 채권·가상 뉴스 사용. Ollama 분류는 실제 호출, 실패하면 분류 보류.
+# Telegram 세션은 열지 않으므로 기존 서비스와 동시에 테스트 가능.
+python bond_monitor.py --mock --dry-run
+# 실제 KIS 데이터 단회 조회, Telegram 연결/전송 없음
+python bond_monitor.py --dry-run
+```
+
+독립 실행 시에는 반드시 기존 서비스를 먼저 중지해야 동일한 Userbot 세션을 재사용할 수 있습니다.
+
+```sh
+docker compose stop telegram-filter
+docker compose run --rm --no-deps telegram-filter sh -c 'pip install -r requirements.txt && python bond_monitor.py --once'
+docker compose -f docker-compose.yml -f docker-compose.deals.yml up -d telegram-filter
+```
+
+`--once` 없이 실행하면 APScheduler로 계속 감시합니다. 독립 실행 중에는 기존 뉴스 필터를 함께 시작하지 마세요. 두 기능의 상시 운영은 위의 통합 실행을 사용합니다.
+
+데이터 명세: [KIS 공식 일별시세 예제](https://github.com/koreainvestment/open-trading-api/tree/main/examples_llm/domestic_bond/inquire_daily_itemchartprice), [현재가 예제](https://github.com/koreainvestment/open-trading-api/tree/main/examples_llm/domestic_bond/inquire_price).
+
+### 필요한 키와 발급 위치
+
+| 설정 | 발급/준비 방법 |
+| --- | --- |
+| `KIS_APP_KEY`, `KIS_APP_SECRET` | [한국투자증권 KIS Developers](https://apiportal.koreainvestment.com/)에서 실전 Open API 이용 신청 후 발급받는 App Key와 App Secret. 이 모니터가 새로 요구하는 인증 정보입니다. |
+| `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` | 기존 Userbot 설정 재사용. 신규 설치라면 [Telegram API 개발 도구](https://my.telegram.org/apps)에서 발급합니다. |
+| `DESTINATION_CHAT_ID` | 기존 알림 목적지 재사용. API 키가 아닙니다. |
+| `OLLAMA_HOST`, `OLLAMA_MODEL` | 기존 로컬 Ollama 설정 재사용. 기본 구성에는 추가 API 키가 없습니다. |
+
+네이버 금융 HTML 수집에는 네이버 검색 API 키를 사용하지 않습니다. KIS 토큰은 App Key/Secret으로 자동 발급하고 메모리에서 만료 전까지 재사용합니다. 계좌번호·주문 권한을 코드 입력으로 요구하지 않으며 실제 인증 정보는 Git에 올리지 않습니다.
+
+배포 순서:
+
+1. 저장소 변경사항을 pull한 뒤 `SINGLE_RUNTIME_CONFIRM=YES ./scripts/update_single_runtime.sh`로 기존 단일 운영 디렉터리를 갱신합니다.
+2. 운영 디렉터리에서 `bond_watchlist.example.json`을 `bond_watchlist.json`으로 복사하고 실제 회사채 정보를 입력합니다. 기존 파일이 있으면 덮어쓰지 않습니다.
+3. 운영 `.env`에 KIS 키를 넣고 `BOND_MONITOR_ENABLED=true`를 설정합니다.
+4. 위 Compose 재생성 명령으로 설정을 적용합니다. 로그의 `회사채 감시 예약 완료`를 확인합니다.
+
+기존 뉴스/당근 기능은 그대로 동작하며 회사채 모니터는 기본 비활성화입니다. 키와 관심 채권 설정을 완료한 뒤 활성화하세요.
+
+검증 현황: 회귀 테스트 63개 통과, 실제 로컬 Mica 연결과 Mock 급락 감지 확인. Mica의 내부 추론이 출력 한도를 소진하는 문제는 `think=False`로 처리하고 JSON enum으로 분류값을 제한했습니다. 반환값은 네 단어 중 하나만 사용합니다. 다만 가상 실적 악화 뉴스가 수급이슈로 분류된 사례가 있어 원인 분류 정확도를 보장하지 않습니다. 실제 KIS 키를 사용한 시세 조회·실제 뉴스 수집·Telegram 발송의 종단 검증은 별도로 필요합니다.

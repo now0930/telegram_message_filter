@@ -73,6 +73,8 @@ async def main(check_latest=False):
                             portal_verifier=PortalVerifier(
                                 max_age_days=int(os.getenv('PORTAL_MAX_AGE_DAYS', '7'))))
     deal_bridge = None
+    bond_monitor = None
+    bond_scheduler = None
     logger.info("@best_article 추가 필터: 네이버·다음 기사 본문 대조 필수 (API 키 불필요)")
     logger.info("Telegram 연결 시작...")
     try:
@@ -118,10 +120,24 @@ async def main(check_latest=False):
                                      os.getenv('DEALS_DB_PATH', 'deal_notifications.sqlite3'),
                                      os.environ['DEALS_WEBHOOK_TOKEN'], send_deal)
             await deal_bridge.start(port=int(os.getenv('DEALS_PORT', '8090')))
+        if os.getenv('BOND_MONITOR_ENABLED', 'false').lower() == 'true':
+            from bond_monitor import BondMonitor
+
+            async def send_bond(message):
+                return await telegram_client.send_message(destination, message, parse_mode=None, link_preview=False)
+
+            bond_monitor = BondMonitor(send_bond)
+            bond_scheduler = bond_monitor.start()
+            logger.info('회사채 감시 예약 완료 (Asia/Seoul, 기존 Telethon 연결 공유)')
         telegram_client.add_event_handler(handler, events.NewMessage(chats=channels))
         logger.info("필터 준비 완료. 지금부터 새 메시지를 처리합니다. 이전 글은 --check-latest로 전송 없이 확인할 수 있습니다.")
         await telegram_client.run_until_disconnected()
     finally:
+        if bond_scheduler:
+            bond_scheduler.shutdown(wait=False)
+        if bond_monitor:
+            async with bond_monitor.lock:
+                bond_monitor.db.close()
         if deal_bridge:
             await deal_bridge.close()
         await telegram_client.disconnect()
