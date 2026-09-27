@@ -152,6 +152,7 @@ class BondMonitor:
         self.db = sqlite3.connect(':memory:' if dry_run else os.getenv('BOND_DB_PATH', 'bond_history.sqlite3'))
         self.db.execute('CREATE TABLE IF NOT EXISTS yields (isin TEXT, day TEXT, value TEXT, PRIMARY KEY(isin,day))')
         self.db.execute('CREATE TABLE IF NOT EXISTS sent (isin TEXT, day TEXT, PRIMARY KEY(isin,day))')
+        self.db.execute('CREATE TABLE IF NOT EXISTS unavailable (isin TEXT PRIMARY KEY, day TEXT, reason TEXT)')
         self.lock = asyncio.Lock()
 
     async def run_once(self):
@@ -162,12 +163,24 @@ class BondMonitor:
                 bonds = json.loads(Path(os.getenv('BOND_WATCHLIST_PATH', 'bond_watchlist.json')).read_text())
             skipped = 0
             failed = 0
+            day = datetime.now(KST).strftime('%Y%m%d')
             for bond in bonds:
+                unavailable = self.db.execute(
+                    'SELECT day FROM unavailable WHERE isin=?', (bond.get('isin'),)).fetchone()
+                if unavailable and unavailable[0] == day:
+                    skipped += 1
+                    continue
                 try:
                     await self.process(bond)
+                    self.db.execute('DELETE FROM unavailable WHERE isin=?', (bond.get('isin'),))
+                    self.db.commit()
                 except (ValueError, requests.RequestException) as exc:
                     # Illiquid/unsupported bonds are expected in a broad watchlist.
                     skipped += 1
+                    self.db.execute(
+                        'INSERT OR REPLACE INTO unavailable VALUES (?,?,?)',
+                        (bond.get('isin'), day, str(exc)[:300]))
+                    self.db.commit()
                 except Exception:
                     failed += 1
                     LOG.exception('회사채 처리 실패: %s', bond.get('isin', 'unknown'))
