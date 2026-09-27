@@ -215,9 +215,18 @@ class BondMonitor:
     def start(self):
         hour = int(os.getenv('BOND_HOUR', '16'))
         minute = int(os.getenv('BOND_MINUTE', '10'))
+        interval = int(os.getenv('BOND_INTERVAL_MINUTES', '0'))
+        scheduler = AsyncIOScheduler(timezone=KST)
+        if interval > 0:
+            if interval < 1:
+                raise ValueError('회사채 조회 간격은 1분 이상이어야 합니다.')
+            scheduler.add_job(self.run_once, 'interval', minutes=interval,
+                              max_instances=1, coalesce=True, misfire_grace_time=300)
+            scheduler.start()
+            LOG.info('회사채 감시 예약 완료 (매 %s분, Asia/Seoul)', interval)
+            return scheduler
         if not 16 <= hour <= 23 or not 0 <= minute <= 59:
             raise ValueError('회사채 일별 감시는 16~23시, 0~59분으로 설정하세요.')
-        scheduler = AsyncIOScheduler(timezone=KST)
         scheduler.add_job(self.run_once, 'cron', day_of_week='mon-fri',
                           hour=hour, minute=minute,
                           max_instances=1, coalesce=True, misfire_grace_time=300)

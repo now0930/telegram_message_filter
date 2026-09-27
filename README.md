@@ -271,6 +271,8 @@ BOND_WATCHLIST_PATH=bond_watchlist.json
 BOND_DB_PATH=bond_history.sqlite3
 BOND_HOUR=16
 BOND_MINUTE=10
+# 선택: 1 이상이면 지정 시각 대신 이 간격(분)으로 반복 조회
+BOND_INTERVAL_MINUTES=0
 ```
 
 KIS 실전 Open API 이용 신청이 필요합니다. 키는 서버 `.env`에만 저장합니다. 기존 Telegram 환경 변수와 `OLLAMA_HOST`, `OLLAMA_MODEL`을 재사용합니다. 기본 모델은 `hf.co/sky7350/Mica-v0.1-4B:Q5_K_M`입니다.
