@@ -177,7 +177,7 @@ SINGLE_RUNTIME_CONFIRM=YES ./scripts/clone_restart.sh
 
 관심 품목은 `telegram_message_filter/deal_watchlist.json`에서 편집합니다. 서버는 처리 시 설정을 다시 읽으므로 품목/가격 변경에 재시작은 필요하지 않습니다. 기본 `enabled: false`는 수신·판정만 하는 확인 모드입니다. `true`로 바꾸면 이후 조건을 통과한 새 알림을 Telegram에 전송합니다. 확인 모드에서 이미 처리한 알림은 소급 전송하지 않습니다.
 
-지역·품목·가격은 각 운영자의 `deal_watchlist.json`에서 설정합니다. 공개 문서에는 실제 지역이나 개인별 가격을 기록하지 않습니다. 인접 지역은 자동으로 포함하지 않으며, 스피커·노트북처럼 모델이 다양한 품목은 기준가가 실제 동일 모델 시세와 다를 수 있습니다. `name`, `reference_price`, `required_patterns`, `excluded_title_patterns`를 편집해 관심 모델을 구체화할 수 있습니다.
+지역·품목·가격은 각 운영자의 `deal_watchlist.json`에서 설정합니다. 공개 문서에는 실제 지역이나 개인별 가격을 기록하지 않습니다. `reference_price`와 `max_price_percent`는 신품 기준가의 일정 비율을 상한으로 사용하고, 품목에 `target_price`를 넣으면 그 금액 이하일 때만 알림을 보냅니다. `target_price`가 있으면 비율 계산보다 우선합니다. 인접 지역은 자동으로 포함하지 않으며, 스피커·노트북처럼 모델이 다양한 품목은 기준가가 실제 동일 모델 시세와 다를 수 있습니다. `name`, `reference_price`, `target_price`, `required_patterns`, `excluded_title_patterns`를 편집해 관심 모델을 구체화할 수 있습니다.
 
 ### 판정과 한계
 

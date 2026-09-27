@@ -38,6 +38,8 @@ def load_watchlist(path):
             raise ValueError('품목 이름 누락')
         if type(item.get('reference_price')) is not int or item['reference_price'] <= 0:
             raise ValueError('기준 가격은 양의 정수여야 합니다.')
+        if 'target_price' in item and (type(item['target_price']) is not int or item['target_price'] <= 0):
+            raise ValueError('목표 가격은 양의 정수여야 합니다.')
         if item.get('reference_type') != 'user_defined_new_price':
             raise ValueError('지원하지 않는 기준 가격 유형')
         for key in ('required_patterns', 'excluded_title_patterns'):
@@ -57,7 +59,9 @@ def evaluate(listing, item, config):
         return False, '판매 중 또는 설정 지역 매물로 확인되지 않음'
     if type(listing.price) is not int or listing.price <= 0:
         return False, '확정 판매가격 없음'
-    ceiling = item['reference_price'] * config['max_price_percent'] // 100
+    ceiling = item.get('target_price')
+    if ceiling is None:
+        ceiling = item['reference_price'] * config['max_price_percent'] // 100
     if listing.price > ceiling:
         return False, '가격 상한 초과'
     text = listing.title + '\n' + listing.description
@@ -71,6 +75,8 @@ def evaluate(listing, item, config):
         return False, '개봉/사용 또는 미개봉과 모순되는 설명'
     if not re.search(r'미개봉|미\s*개봉|미개봉씰|밀봉|씰\s*미훼손|unopened|factory\s*sealed', text, re.I):
         return False, '명시적인 미개봉 근거 없음'
+    if item.get('target_price') is not None:
+        return True, f"직접 설정한 목표 가격 {ceiling:,}원 이하 및 판매자 미개봉 표기"
     return True, f"설정 기준가의 {config['max_price_percent']}% 이하 및 판매자 미개봉 표기"
 
 
@@ -79,12 +85,16 @@ def render_alert(listing, item, config):
     if listing.url and (parsed.scheme != 'https' or parsed.netloc != 'www.daangn.com' or not parsed.path.startswith('/kr/buy-sell/')):
         raise ValueError('당근 매물 링크가 아닙니다.')
     discount = 100 * (item['reference_price'] - listing.price) / item['reference_price']
+    if item.get('target_price') is not None:
+        price_rule = f"직접 설정한 목표 가격: {item['target_price']:,}원"
+    else:
+        price_rule = f"직접 설정한 새제품 기준가: {item['reference_price']:,}원"
     return (f"[당근 가격 알림] {item['name']}\n"
             f"{listing.title[:200]}\n"
             f"지역: {config['region']['name']}\n"
             f"판매가: {listing.price:,}원\n"
-            f"직접 설정한 새제품 기준가: {item['reference_price']:,}원\n"
-            f"설정 기준가 대비 {discount:.1f}% 저렴\n"
+            f"{price_rule}\n"
+            f"새제품 기준가 대비 {discount:.1f}% 저렴\n"
             "상태: 판매글에 미개봉 표기 (실물 확인 전)\n"
             "기준가는 동일 모델의 실시간 거래 시세를 조회한 값이 아닙니다.\n"
             f"{listing.url or '링크 없음: 당근 앱의 원본 알림에서 확인하세요.'}")

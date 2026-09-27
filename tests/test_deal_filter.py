@@ -27,6 +27,11 @@ class DealTests(unittest.TestCase):
         self.assertTrue(evaluate(self.listing, self.watch, self.config)[0])
         self.assertFalse(evaluate(replace(self.listing, price=50001), self.watch, self.config)[0])
 
+    def test_explicit_target_price_overrides_percentage(self):
+        self.watch['target_price'] = 40000
+        self.assertFalse(evaluate(self.listing, self.watch, self.config)[0])
+        self.assertTrue(evaluate(replace(self.listing, price=40000), self.watch, self.config)[0])
+
     def test_other_region_unknown_status_and_deposit_are_excluded(self):
         for changes in ({'region_id': 1634}, {'status': 'reserved'}, {'status': 'sold'},
                         {'status': 'unknown'}, {'price': 0}, {'price': True}, {'description': '예약금 10만원입니다'}):
