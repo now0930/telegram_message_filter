@@ -223,3 +223,13 @@ MacroDroid 공식 문서: [알림 트리거](https://www.macrodroidforum.com/wik
 ### 업데이트 시 주의
 
 뉴스 모듈 외에 `deal_filter.py`, `deal_bridge.py`, `docker-compose.deals.yml`도 복사해야 합니다. 최초 설치에서만 `deal_watchlist.json`을 복사하고, 이후에는 사용자 설정 파일을 보존하세요. 당근 연동을 유지하려면 재생성 시 위 두 Compose 파일을 함께 지정해야 합니다.
+
+## 안전한 Git 푸시
+
+작업 트리가 깨끗하고 원격보다 앞선 커밋만 확인한 뒤 일반 fast-forward 푸시를 하려면 다음 스크립트를 사용합니다. 강제 푸시, 자동 병합, 비밀·런타임 파일이 포함된 커밋은 거부합니다.
+
+```sh
+./scripts/safe_push.sh
+```
+
+자동화 환경에서는 내용을 별도로 검토한 뒤 `PUSH_CONFIRM=YES ./scripts/safe_push.sh`를 사용하세요. 원격이 앞선 경우에는 스크립트가 중단되므로 먼저 `git pull --rebase` 결과를 확인해야 합니다.
