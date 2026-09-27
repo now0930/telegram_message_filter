@@ -192,6 +192,21 @@ docker compose \
 
 `git log`에서 원격에 푸시한 최신 커밋을 확인한 뒤 서비스를 시작하세요. `.env`, `*.session*`, `*.sqlite3`는 인증·운영 데이터이므로 clone만으로 복원되지 않습니다. 기존 컨테이너를 먼저 내린 뒤 새 디렉터리에서 시작해야 고정된 컨테이너 이름 충돌을 피할 수 있습니다.
 
+위 절차를 자동화하려면 저장소 루트에서 다음 스크립트를 사용합니다. 기본값은 기존 디렉터리 `/home/now0930/telegram_message_filter`, 새 디렉터리 `/home/now0930/telegram_message_filter_next`입니다. 새 디렉터리가 이미 있으면 중단하며 기존 디렉터리를 삭제하지 않습니다.
+
+```sh
+./scripts/clone_restart.sh
+```
+
+비대화형 실행은 대상 경로와 원격 저장소를 확인한 뒤 다음처럼 명시적으로 승인합니다.
+
+```sh
+CLONE_RESTART_CONFIRM=YES \
+OLD_DIR=/home/now0930/telegram_message_filter \
+NEW_DIR=/home/now0930/telegram_message_filter_next \
+./scripts/clone_restart.sh
+```
+
 ## 당근 가격 알림 — 안드로이드 알림 연동
 
 공개 웹 검색은 지역 정보는 반환하지만 실매물 목록을 확인할 수 없어 수집기로 사용하지 않습니다. **안드로이드의 당근 키워드 알림을 인증된 웹훅으로 전달**하고, 명시적인 조건을 충족한 알림만 기존 Telegram 연결로 전송합니다. 휴대폰의 MacroDroid 설정이 필요하며, 설정 전에는 매물이 자동 수집되지 않습니다.
