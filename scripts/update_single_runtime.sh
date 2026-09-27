@@ -52,7 +52,6 @@ tracked_files=(
   .env.example .gitignore README.md deal_bridge.py deal_filter.py
   docker-compose.deals.yml docker-compose.yml main.py news_filter.py
   portal_verifier.py requirements.txt bond_monitor.py bond_watchlist.example.json
-  bond_watchlist.json
 )
 
 printf '임시 clone: %s\n' "$repo_url"
@@ -75,6 +74,9 @@ for file in .env telegram_session.session news_history.sqlite3 deal_notification
 done
 if [[ ! -e "$staged_runtime/deal_watchlist.json" ]]; then
   cp -a "$staged_dir/deal_watchlist.json" "$staged_runtime/deal_watchlist.json"
+fi
+if [[ ! -e "$staged_runtime/bond_watchlist.json" ]]; then
+  cp -a "$staged_dir/bond_watchlist.example.json" "$staged_runtime/bond_watchlist.json"
 fi
 docker compose \
   -f "$staged_runtime/docker-compose.yml" \
