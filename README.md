@@ -275,6 +275,8 @@ BOND_MINUTE=10
 BOND_INTERVAL_MINUTES=0
 ```
 
+`BOND_INTERVAL_MINUTES`가 1 이상이면 지정 시각 대신 해당 분 간격으로 조회합니다(예: `30` 또는 `60`). 거래일·거래량 부족이나 KIS 미지원으로 조회할 수 없는 종목은 SQLite에 날짜별로 기록해 같은 날 반복 조회하지 않고, 다음 날 한 번 다시 확인합니다. 5,000개 이상을 등록할 때는 KIS 호출량과 rate limit을 고려해 30~60분 이상의 간격을 권장합니다.
+
 KIS 실전 Open API 이용 신청이 필요합니다. 키는 서버 `.env`에만 저장합니다. 기존 Telegram 환경 변수와 `OLLAMA_HOST`, `OLLAMA_MODEL`을 재사용합니다. 기본 모델은 `hf.co/sky7350/Mica-v0.1-4B:Q5_K_M`입니다.
 
 ```sh
@@ -320,7 +322,7 @@ docker compose -f docker-compose.yml -f docker-compose.deals.yml up -d telegram-
 배포 순서:
 
 1. 저장소 변경사항을 pull한 뒤 `SINGLE_RUNTIME_CONFIRM=YES ./scripts/update_single_runtime.sh`로 기존 단일 운영 디렉터리를 갱신합니다.
-2. 운영 디렉터리에서 `bond_watchlist.example.json`을 `bond_watchlist.json`으로 복사하고 실제 목록을 입력합니다. 기존 파일은 업데이트 과정에서 보존됩니다.
+2. 운영 디렉터리에서 `bond_watchlist.example.json`을 `bond_watchlist.json`으로 복사하거나 CSV를 JSON 목록으로 변환해 실제 관심 채권을 입력합니다. `bond_watchlist.json`은 Git에서 제외되며 업데이트 과정에서 보존됩니다.
 3. 운영 `.env`에 KIS 키를 넣고 `BOND_MONITOR_ENABLED=true`를 설정합니다.
 4. 위 Compose 재생성 명령으로 설정을 적용합니다. 로그의 `회사채 감시 예약 완료`를 확인합니다.
 
