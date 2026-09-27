@@ -29,13 +29,28 @@ AI가 중요도·깊이·근거를 각각 0~5점으로 평가하고, 실제 전�
 
 중요도 5·근거 4 이상인 중대한 공식 결정은 깊이 2라도 전달합니다. 단순 등락률 나열, 제목·링크만 있는 글, 반복 전망, 관심 단어만 포함한 홍보는 제외합니다. `MIN_IMPORTANCE=5`로 설정하면 최상위 중요 사건만 통과시킵니다.
 
-점수와 설명은 AI 판단이며 외부 사실 확인이 아닙니다. 링크의 기사 본문을 자동으로 가져오지 않습니다. 분야와 평가 기준은 `telegram_message_filter/news_filter.py`의 `EDITOR_PROMPT`에서 수정합니다.
+점수와 설명은 AI 판단입니다. 일반 채널에서는 링크의 기사 본문을 가져오지 않으며, `@best_article`에 한해 아래 포털 대조를 추가합니다. 분야와 평가 기준은 `telegram_message_filter/news_filter.py`의 `EDITOR_PROMPT`에서 수정합니다.
 
 ### 중복 제거
 
 동일 본문은 공백·유니코드 표기를 정규화한 해시로 비교합니다. 표현이나 채널이 다른 보도는 전달된 요약의 핵심 사실과 AI로 비교합니다. 주제가 같아도 실적기간·정책 발표·사건이 다르면 별도 뉴스로 취급합니다. 최근 기록은 15개씩 나누어 전체 비교하므로 전달량이 늘면 처리 지연과 AI 호출량도 늘어납니다.
 
 전송 성공 후에만 기록하며, 동시 수신도 순서대로 처리해 중복 발송을 줄입니다. Telegram 전송 직후 DB 저장 전에 프로세스가 종료되는 경우까지 완전한 1회 발송을 보장하지는 않습니다. 원문 채널의 메시지를 삭제하는 기능은 아닙니다.
+
+### `@best_article` 전용 포털 대조
+
+이 채널은 기존 중요도 기준을 통과한 뒤에도 **네이버·다음 뉴스 검색으로 찾은 기사 본문과 핵심 사실이 일치해야** 전달합니다. API 키나 별도 유료 검색 서비스 없이 공개 뉴스 검색을 이용합니다. 검색에는 게시글에서 추출한 회사/기관·사건 키워드만 보냅니다.
+
+1. 원문을 요약·평가하고 일반 산업/거시 선별 기준을 적용합니다.
+2. 네이버·다음에서 검색하고 포털별 최대 3개 기사 본문을 조회합니다.
+3. 기본 최근 7일 이내 기사만 사용합니다. 기사 날짜를 읽지 못한 경우 제외합니다.
+4. 같은 주체·사건·기간·수치인지 대조합니다. 비슷한 키워드만 있는 기사는 통과 근거가 아닙니다.
+5. 선택한 기사 하나가 요약의 핵심 사실 전체를 뒷받침해야 합니다. AI가 제시한 근거 구절도 실제 기사 본문에 존재해야 합니다.
+6. 통과하면 기존 중복 제거를 거쳐 요약에 `포털 보도 대조` 기사 링크를 붙입니다. 전달 기록에 근거 링크도 저장합니다.
+
+검색 결과 없음, 본문 조회 차단, 오래된 기사, 근거 부족, 불일치, 검색/AI 오류는 **전달하지 않습니다**. 단일 포털의 조회가 실패해도 다른 포털에서 읽은 일치 기사가 있으면 통과할 수 있습니다. 두 포털 모두의 일치를 요구하는 방식은 아닙니다. 다른 채널은 기존 필터를 사용합니다. `@best_article`은 사용자명과 확인된 채널 ID로 식별합니다.
+
+이 기능은 포털에 실린 보도와의 대조이며 사실의 진실성 보장이나 독립 언론사 두 곳의 교차 검증은 아닙니다. 같은 기사를 여러 언론이 전재할 수도 있고 AI가 대조를 잘못할 수도 있습니다. 속보가 검색에 아직 반영되지 않았거나 기사 본문 구조가 바뀌면 정상 뉴스도 제외될 수 있습니다. 제외된 글의 자동 재검색은 하지 않습니다. 검색·본문 조회는 최대 45초, 검색어 생성부터 기사 대조까지의 전체 추가 검증은 최대 150초로 제한합니다. 그동안 다른 대기 메시지의 처리가 늦어질 수 있습니다.
 
 ## 준비
 
@@ -59,6 +74,7 @@ cp .env.example .env
 | `OLLAMA_MODEL` | 기본값 `hf.co/sky7350/Mica-v0.1-4B:Q5_K_M` |
 | `MIN_IMPORTANCE` | 4(기본) 또는 5(최상위 중요 사건만) |
 | `DEDUP_HOURS` | 중복 비교 기간, 기본 72시간 |
+| `PORTAL_MAX_AGE_DAYS` | `@best_article` 포털 기사의 최대 경과 일수, 기본 7 (1~30) |
 | `NEWS_DB_PATH` | 기본 `news_history.sqlite3`, Compose 바인드 마운트에 저장 |
 
 감시 계정은 대상 채널에 가입되어 있어야 하며 목적지에 글을 쓸 권한이 있어야 합니다. 개인·봇 계정은 감시 채널로 지원하지 않습니다. 목적지는 감시 채널과 달라야 합니다. `.env`와 `*.session*`은 인증 정보이므로 Git에 올리지 않습니다.
@@ -85,24 +101,28 @@ docker compose run --rm telegram-filter sh -c 'pip install -r requirements.txt &
 docker compose up -d telegram-filter
 ```
 
-각 채널의 최신 글 하나의 분야·점수·요약을 출력하고 종료합니다. 중복 판정·전송·전달 기록 저장은 하지 않습니다. 진단 명령이 실패해도 마지막 `up` 명령으로 서비스를 다시 시작하세요.
+각 채널의 최신 글 하나의 분야·점수·요약을 출력하고 종료합니다. 이 진단 모드는 포털 대조·중복 판정·전송·전달 기록 저장을 하지 않습니다. 진단 명령이 실패해도 마지막 `up` 명령으로 서비스를 다시 시작하세요.
 
 ## 문제 확인
 
 - 준비 완료가 없음: 인증, 채널 접근, 목적지 ID와 시작 오류를 확인합니다.
 - 수신 로그가 없음: 시작 이후의 새 글인지, 감시 계정이 가입했는지, 세션을 다른 프로세스에서 사용 중인지 확인합니다.
 - 선별 제외: 점수·근거·분야 기준을 통과하지 못한 결과입니다. 로그에 점수와 이유가 나옵니다.
+- 포털 대조 제외: 최근 기사 본문을 찾지 못했거나 핵심 사실 일치를 확인하지 못한 결과입니다. 검색 장애는 별도로 기록합니다.
 - 중복 제외: 비교 기간 내 이미 전달한 본문 또는 같은 사건입니다.
 - 분석/중복 확인 실패: Ollama 연결·모델·응답 형식을 확인합니다. 확인에 실패하면 전송하지 않습니다.
 - 전송 실패: 목적지 권한과 Telegram 오류 로그를 확인합니다.
 
 ## 검증 및 한계
 
-저장소 루트에서 외부 연결 없이 회귀 테스트를 실행합니다.
+Python 의존성을 설치한 환경에서 저장소 루트의 회귀 테스트를 실행합니다. 테스트 자체는 외부 연결이나 Telegram 전송을 하지 않습니다.
 
 ```sh
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r telegram_message_filter/requirements.txt
 python3 -m unittest discover -s tests -v
-python3 -m py_compile telegram_message_filter/main.py
+python3 -m py_compile telegram_message_filter/*.py
 ```
 
 회귀 테스트는 점수 기준, 영속 중복 제거, 재작성·후속 사건, 동시 수신, 오류 처리와 원문 링크를 검증합니다. 기존 버전에서 실제 Telegram 전달을 확인했고, 새 편집 기준은 실제 Ollama 모델과 합성 예제로 검증합니다. 장기 무중단 운영 및 다양한 실제 기사에 대한 정확도 평가는 아직 하지 않았습니다.
@@ -111,12 +131,12 @@ python3 -m py_compile telegram_message_filter/main.py
 
 ## 기존 설치 업데이트
 
-실행 디렉터리에 `main.py`뿐 아니라 새 모듈 `news_filter.py`도 함께 복사해야 합니다. `.env`, Telegram 세션, `news_history.sqlite3`는 유지하세요. 저장소를 별도 위치에 내려받았다면 실행 디렉터리에서 다음처럼 적용합니다.
+실행 디렉터리에 `main.py`, `news_filter.py`, `portal_verifier.py`를 모두 복사해야 합니다. `.env`, Telegram 세션, `news_history.sqlite3`는 유지하세요. 저장소를 별도 위치에 내려받았다면 실행 디렉터리에서 다음처럼 적용합니다.
 
 ```sh
 docker compose stop telegram-filter
 # 새 저장소 경로를 실제 경로로 바꾸세요.
-cp /path/to/repository/telegram_message_filter/{main.py,news_filter.py,requirements.txt,docker-compose.yml} .
+cp /path/to/repository/telegram_message_filter/{main.py,news_filter.py,portal_verifier.py,requirements.txt,docker-compose.yml} .
 docker compose up -d --force-recreate telegram-filter
 docker compose logs -f telegram-filter
 ```

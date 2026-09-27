@@ -130,6 +130,9 @@ class History:
         self.db.execute('''CREATE TABLE IF NOT EXISTS delivered (
             id INTEGER PRIMARY KEY, fingerprint TEXT NOT NULL, created REAL NOT NULL,
             analysis TEXT NOT NULL, source TEXT NOT NULL, destination_id INTEGER NOT NULL)''')
+        columns = {row[1] for row in self.db.execute('PRAGMA table_info(delivered)')}
+        if 'portal_verification' not in columns:
+            self.db.execute('ALTER TABLE delivered ADD COLUMN portal_verification TEXT')
         self.db.execute('CREATE INDEX IF NOT EXISTS delivered_created ON delivered(created)')
         self.db.commit()
 
@@ -139,30 +142,35 @@ class History:
         self.db.commit()
         return self.db.execute('SELECT * FROM delivered ORDER BY id DESC').fetchall()
 
-    def remember(self, text, analysis, source, destination_id):
-        self.db.execute('INSERT INTO delivered (fingerprint, created, analysis, source, destination_id) VALUES (?, ?, ?, ?, ?)',
-                        (fingerprint(text), time.time(), json.dumps(analysis, ensure_ascii=False), source, destination_id))
+    def remember(self, text, analysis, source, destination_id, verification=None):
+        self.db.execute('INSERT INTO delivered (fingerprint, created, analysis, source, destination_id, portal_verification) VALUES (?, ?, ?, ?, ?, ?)',
+                        (fingerprint(text), time.time(), json.dumps(analysis, ensure_ascii=False), source, destination_id,
+                         json.dumps(verification, ensure_ascii=False) if verification else None))
         self.db.commit()
 
     def close(self):
         self.db.close()
 
 
-def render_brief(analysis, source, update=False):
+def render_brief(analysis, source, update=False, verification=None):
     # Bound each section to stay comfortably below Telegram's message length limit.
     label = '중요 후속' if update else '핵심 뉴스'
     facts = '\n'.join('• ' + fact[:350] for fact in analysis['facts'])
-    return (f"[{label} · {analysis['topic']}] {analysis['title'][:120]}\n\n"
+    brief = (f"[{label} · {analysis['topic']}] {analysis['title'][:120]}\n\n"
             f"{facts}\n\n왜 중요한가\n{analysis['why_it_matters'][:500]}\n\n"
             f"확인할 점\n{analysis['uncertainty'][:350]}\n\n원문: {source}")
+    if verification:
+        brief += f"\n\n포털 보도 대조: {verification['title'][:120]}\n{verification['url']}"
+    return brief
 
 
 class NewsFilter:
-    def __init__(self, ai, model, history, minimum_importance=4):
+    def __init__(self, ai, model, history, minimum_importance=4, portal_verifier=None):
         if minimum_importance not in (4, 5):
             raise ValueError('MIN_IMPORTANCE는 4 또는 5여야 합니다.')
         self.ai, self.model, self.history = ai, model, history
         self.minimum_importance = minimum_importance
+        self.portal_verifier = portal_verifier
         self.lock = asyncio.Lock()
 
     async def _ask(self, prompt, data, schema):
@@ -178,7 +186,7 @@ class NewsFilter:
             raise ValueError('분석 가능한 게시글 길이 초과')
         return validate_analysis(await self._ask(EDITOR_PROMPT, {'article': text}, ANALYSIS_SCHEMA))
 
-    async def process(self, text, source, send):
+    async def process(self, text, source, send, *, channel_username=None, channel_id=None):
         # Serialize comparison + send + persistence across all channels.
         async with self.lock:
             recent = self.history.recent()
@@ -188,6 +196,13 @@ class NewsFilter:
             scores = f"중요도={result['importance']} 깊이={result['depth']} 근거={result['evidence']}"
             if not qualifies(result, self.minimum_importance):
                 return f"선별 제외 ({scores}): {result['reason']}"
+            verification = None
+            if self.portal_verifier and self.portal_verifier.requires(channel_username, channel_id):
+                verification, reason = await asyncio.wait_for(
+                    self.portal_verifier.verify(text, result, self._ask), timeout=150)
+                if not verification:
+                    return f"포털 대조 제외: {reason}"
+                logger.info("포털 기사 대조 통과: %s", verification['url'])
             update = False
             # Compare all retained briefs in bounded batches, without dropping older candidates.
             for start in range(0, len(recent), 15):
@@ -204,6 +219,6 @@ class NewsFilter:
                     if not match['material_update']:
                         return f"같은 사건 중복 제외: {match['reason']}"
                     update = True
-            sent = await send(render_brief(result, source, update))
-            self.history.remember(text, result, source, sent.id)
+            sent = await send(render_brief(result, source, update, verification))
+            self.history.remember(text, result, source, sent.id, verification)
             return f"전송 완료: destination_id={sent.id} ({scores})"

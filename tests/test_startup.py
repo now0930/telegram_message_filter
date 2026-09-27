@@ -20,7 +20,7 @@ class StartupTests(unittest.IsolatedAsyncioTestCase):
         history = MagicMock()
         events = SimpleNamespace(NewMessage=MagicMock())
         namespace = dict(os=os, History=MagicMock(return_value=history),
-            NewsFilter=MagicMock(), ollama_client=None, telegram_client=client,
+            NewsFilter=MagicMock(), PortalVerifier=MagicMock(), ollama_client=None, telegram_client=client,
             target_channels=['@a', '@b'], DESTINATION_CHAT_ID='-99',
             logger=logging.getLogger('startup-test'), handler=AsyncMock(), events=events,
             utils=SimpleNamespace(get_peer_id=lambda entity: entity.id))

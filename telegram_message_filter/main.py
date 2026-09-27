@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from telethon import TelegramClient, events, utils
 from ollama import AsyncClient
 from news_filter import History, NewsFilter
+from portal_verifier import PortalVerifier
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -53,7 +54,8 @@ async def handler(event):
         async def send(brief):
             return await telegram_client.send_message(dest, brief, parse_mode=None, link_preview=False)
 
-        outcome = await news_filter.process(text, source, send)
+        outcome = await news_filter.process(text, source, send,
+                                            channel_username=username, channel_id=chat.id)
         logger.info("chat=%s source_id=%s %s", event.chat_id, event.message.id, outcome)
     except Exception:
         logger.exception("분석/중복 확인/전송 실패: chat=%s source_id=%s", event.chat_id, event.message.id)
@@ -67,7 +69,10 @@ async def main(check_latest=False):
                       hours=int(os.getenv('DEDUP_HOURS', '72')))
     news_filter = NewsFilter(ollama_client,
                             os.getenv('OLLAMA_MODEL', 'hf.co/sky7350/Mica-v0.1-4B:Q5_K_M'),
-                            history, int(os.getenv('MIN_IMPORTANCE', '4')))
+                            history, int(os.getenv('MIN_IMPORTANCE', '4')),
+                            portal_verifier=PortalVerifier(
+                                max_age_days=int(os.getenv('PORTAL_MAX_AGE_DAYS', '7'))))
+    logger.info("@best_article 추가 필터: 네이버·다음 기사 본문 대조 필수 (API 키 불필요)")
     logger.info("Telegram 연결 시작...")
     try:
         await telegram_client.connect()

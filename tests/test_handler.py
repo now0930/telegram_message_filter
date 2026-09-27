@@ -12,7 +12,7 @@ handler = next(n for n in ast.parse(source.read_text()).body
 class HandlerTests(unittest.IsolatedAsyncioTestCase):
     def setup_handler(self):
         client = SimpleNamespace(send_message=AsyncMock(return_value=SimpleNamespace(id=42)))
-        async def process(text, source, send):
+        async def process(text, source, send, **kwargs):
             await send('요약: ' + text + '\n' + source)
             return '전송 완료'
         editor = SimpleNamespace(process=AsyncMock(side_effect=process))

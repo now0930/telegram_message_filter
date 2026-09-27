@@ -42,6 +42,22 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(validate_analysis(json.dumps(value)), value)
         self.assertFalse(qualifies(value))
 
+    def test_existing_history_database_migrates_without_losing_rows(self):
+        import sqlite3
+        with tempfile.TemporaryDirectory() as directory:
+            path = str(Path(directory) / 'legacy.sqlite3')
+            db = sqlite3.connect(path)
+            db.execute('CREATE TABLE delivered (id INTEGER PRIMARY KEY, fingerprint TEXT, created REAL, analysis TEXT, source TEXT, destination_id INTEGER)')
+            import time
+            db.execute('INSERT INTO delivered VALUES (1, ?, ?, ?, ?, ?)',
+                       (fingerprint('원문'), time.time(), json.dumps(analysis()), 'a/1', 12))
+            db.commit(); db.close()
+            history = History(path)
+            row = history.recent()[0]
+            self.assertEqual(row['destination_id'], 12)
+            self.assertIsNone(row['portal_verification'])
+            history.close()
+
     def test_fingerprint_preserves_material_numbers(self):
         self.assertEqual(fingerprint('AI  공급\n확대'), fingerprint('ai 공급 확대'))
         self.assertNotEqual(fingerprint('30% 확대'), fingerprint('40% 확대'))
@@ -126,6 +142,40 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.gather(self.filter.process('원문', 'a/1', self.sender),
                              self.filter.process('원문', 'b/2', self.sender))
         self.sender.assert_awaited_once()
+
+    async def test_target_portal_mismatch_prevents_send_and_history(self):
+        self.replies(analysis())
+        self.filter.portal_verifier = SimpleNamespace(requires=lambda *args: True,
+            verify=AsyncMock(return_value=(None, '불일치')))
+        outcome = await self.filter.process('원문', 'a/1', self.sender, channel_username='best_article')
+        self.assertIn('포털 대조 제외', outcome)
+        self.sender.assert_not_awaited()
+        self.assertEqual(len(self.history.recent()), 0)
+
+    async def test_portal_exception_cannot_send(self):
+        self.replies(analysis())
+        self.filter.portal_verifier = SimpleNamespace(requires=lambda *args: True,
+            verify=AsyncMock(side_effect=TimeoutError()))
+        with self.assertRaises(TimeoutError):
+            await self.filter.process('원문', 'a/1', self.sender, channel_id=1030607534)
+        self.sender.assert_not_awaited()
+
+    async def test_other_channels_do_not_require_portal_search(self):
+        self.replies(analysis())
+        verifier = SimpleNamespace(requires=lambda *args: False, verify=AsyncMock())
+        self.filter.portal_verifier = verifier
+        await self.filter.process('원문', 'a/1', self.sender, channel_username='other')
+        verifier.verify.assert_not_awaited()
+        self.sender.assert_awaited_once()
+
+    async def test_verified_source_is_linked_and_persisted(self):
+        self.replies(analysis())
+        evidence = dict(url='https://v.daum.net/v/20260927093939078', title='포털 보도', reason='일치')
+        self.filter.portal_verifier = SimpleNamespace(requires=lambda *args: True,
+            verify=AsyncMock(return_value=(evidence, '일치')))
+        await self.filter.process('원문', 'a/1', self.sender, channel_username='best_article')
+        self.assertIn(evidence['url'], self.sender.call_args.args[0])
+        self.assertEqual(json.loads(self.history.recent()[0]['portal_verification']), evidence)
 
     async def test_expired_records_are_removed(self):
         self.history.remember('원문', analysis(), 'a/1', 1)
