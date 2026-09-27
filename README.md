@@ -140,9 +140,86 @@ python3 -m py_compile telegram_message_filter/*.py
 ```sh
 docker compose stop telegram-filter
 # 새 저장소 경로를 실제 경로로 바꾸세요.
-cp /path/to/repository/telegram_message_filter/{main.py,news_filter.py,portal_verifier.py,requirements.txt,docker-compose.yml} .
+cp /path/to/repository/telegram_message_filter/{main.py,news_filter.py,portal_verifier.py,deal_filter.py,deal_bridge.py,requirements.txt,docker-compose.yml,docker-compose.deals.yml} .
+# 사용자 품목 설정을 덮어쓰지 않도록 최초 설치에만 복사
+if [ ! -f deal_watchlist.json ]; then
+  cp /path/to/repository/telegram_message_filter/deal_watchlist.json .
+fi
 docker compose up -d --force-recreate telegram-filter
 docker compose logs -f telegram-filter
 ```
 
+당근 웹훅을 사용 중이면 위 `up` 명령 대신 `docker compose -f docker-compose.yml -f docker-compose.deals.yml up -d --force-recreate telegram-filter`를 사용하세요.
+
 `.env`의 채널 목록 변경도 `restart`만 하지 말고 `up -d --force-recreate`로 환경 변수를 다시 읽도록 합니다.
+
+## 당근 가격 알림 — 안드로이드 알림 연동
+
+공개 웹 검색은 지역 정보는 반환하지만 실매물 목록을 확인할 수 없어 수집기로 사용하지 않습니다. **안드로이드의 당근 키워드 알림을 인증된 웹훅으로 전달**하고, 명시적인 조건을 충족한 알림만 기존 Telegram 연결로 전송합니다. 휴대폰의 MacroDroid 설정이 필요하며, 설정 전에는 매물이 자동 수집되지 않습니다.
+
+관심 품목은 `telegram_message_filter/deal_watchlist.json`에서 편집합니다. 서버는 처리 시 설정을 다시 읽으므로 품목/가격 변경에 재시작은 필요하지 않습니다. 기본 `enabled: false`는 수신·판정만 하는 확인 모드입니다. `true`로 바꾸면 이후 조건을 통과한 새 알림을 Telegram에 전송합니다. 확인 모드에서 이미 처리한 알림은 소급 전송하지 않습니다.
+
+| 품목 | 직접 설정한 새제품 기준가 | 알림 상한 (50% 이하) |
+| --- | ---: | ---: |
+| 갤럭시 워치9 44mm | 510,000원 | 255,000원 |
+| 블루투스 스피커 | 200,000원 | 100,000원 |
+| ARM 기반 노트북 | 1,200,000원 | 600,000원 |
+
+지역은 **경기도 군포시 산본2동**이며 인접 동네를 자동 포함하지 않습니다. 스피커/노트북은 모델이 다양하므로 기준가가 실제 동일 모델 시세와 다를 수 있습니다. `name`, `reference_price`, `required_patterns`, `excluded_title_patterns`를 편집해 관심 모델을 구체화할 수 있습니다.
+
+### 판정과 한계
+
+알림 텍스트 자체에서 산본2동·판매 중·정확한 가격·모델·미개봉을 확인해야 합니다. 미사용/새상품만 적힌 글, 미개봉급, 개봉 후 미사용, 구매글, 예약금/보증금, 제외 모델/액세서리는 제외합니다. 상태나 가격이 생략된 실제 당근 알림은 `insufficient`로 기록되고 전송되지 않습니다. 알림의 형식은 아직 실제 휴대폰 샘플로 검증하지 않았으므로 연동 후 수신 결과를 확인해야 합니다. 필요한 정보가 원래 알림에 없다면 상세 매물 정보를 추가로 제공하는 방식이 필요합니다.
+
+- 가격은 사용자 지정 기준가입니다. 실시간 중고 거래 시세를 자동 조회하지 않습니다.
+- 미개봉과 판매 중 상태는 알림에 적힌 주장이지 실물/현재 상태를 직접 확인한 결과가 아닙니다.
+- 알림에 링크가 없으면 당근 앱의 원본 알림에서 확인하도록 안내합니다.
+- 동일 알림과 같은 매물 링크·가격은 중복 전송하지 않습니다. 링크 없는 알림의 표현이 달라지면 중복이 생길 수 있습니다.
+- 전달 실패는 최대 3회 시도합니다. 24시간 지난 알림은 제외하며 원본 알림은 7일, 전송 중복 기록은 90일 보관합니다.
+- Telegram 전송 직후 저장 전에 프로세스가 종료되면 중복 가능성이 있습니다.
+
+### 서버 설정
+
+실행 디렉터리의 `.env`에 무작위 `DEALS_WEBHOOK_TOKEN`을 설정합니다. 비어 있으면 웹훅은 시작하지 않습니다. 토큰은 Git/채팅에 올리지 마세요.
+
+```sh
+# 실행 디렉터리에서: 토큰이 없을 때만 생성합니다.
+python3 - <<'PYTOKEN'
+from pathlib import Path
+import secrets
+p = Path('.env')
+text = p.read_text()
+if not any(line.startswith('DEALS_WEBHOOK_TOKEN=') and line.split('=', 1)[1].strip() for line in text.splitlines()):
+    lines = [line for line in text.splitlines() if not line.startswith('DEALS_WEBHOOK_TOKEN=')]
+    p.write_text('\n'.join(lines) + '\nDEALS_WEBHOOK_TOKEN=' + secrets.token_urlsafe(32) + '\n')
+PYTOKEN
+
+docker compose -f docker-compose.yml -f docker-compose.deals.yml up -d --force-recreate telegram-filter
+```
+
+`docker-compose.deals.yml`은 현재 서버의 Apache 네트워크 `docker_compose_rest_api_web_network`를 사용합니다. 다른 설치에서는 네트워크 이름을 바꾸세요. 8090 포트는 인터넷에 직접 공개하지 않습니다. HTTPS 가상호스트에 [Apache 예제](deploy/apache-deals.conf)를 추가하고 설정 검사 후 reload합니다.
+
+현재 연결 주소:
+
+- `POST https://now0930.pe.kr/deals/notification`: 알림 수신
+- `GET https://now0930.pe.kr/deals/status`: 인증 후 상태 확인
+- 공통 헤더: `Authorization: Bearer <DEALS_WEBHOOK_TOKEN 값>`
+- 수신 추가 헤더: `X-Notification-App: com.towneers.www`
+- 수신 본문 형식: `Content-Type: text/plain; charset=utf-8`
+
+상태에는 `pending`, `preview`, `insufficient`, `rejected`, `sent`, `duplicate`, `failed` 건수와 최근 제외 이유가 표시됩니다. 원본 알림이나 인증 토큰은 상태 응답에 노출하지 않습니다.
+
+### 휴대폰 설정 (MacroDroid)
+
+1. 당근 앱에서 동네를 산본2동으로 설정하고 관심 키워드(갤럭시 워치9, 블루투스 스피커, ARM 노트북/스냅드래곤 노트북/맥북)를 등록합니다. 실제 알림 제공 범위/조건은 앱 설정을 확인하세요.
+2. MacroDroid를 설치하고 알림 접근 권한을 허용합니다.
+3. 새 매크로의 **알림 수신** 트리거에서 당근(`com.towneers.www`)만 선택하고, 실제 키워드 알림에 맞는 텍스트 필터를 설정합니다. 개인 채팅 알림을 함께 전달하지 마세요.
+4. **HTTP Request** 액션에서 위 수신 URL, POST, 헤더 3개를 설정합니다.
+5. 본문은 일반 텍스트로 두고 MacroDroid의 **매직 텍스트 선택기**에서 알림 제목·본문·확장 본문을 줄바꿈으로 넣습니다. 지역·가격·판매중 같은 없는 내용을 상수로 덧붙이지 마세요. JSON으로 감싸지 않습니다.
+6. 실제 알림 하나를 받은 뒤 상태 API/로그로 수신 결과를 확인합니다. 형식에 필요한 정보가 모두 있으면 `deal_watchlist.json`의 `enabled`를 `true`로 바꾸세요.
+
+MacroDroid 공식 문서: [알림 트리거](https://www.macrodroidforum.com/wiki/index.php/Trigger:_Notification), [HTTP Request](https://www.macrodroidforum.com/wiki/index.php/Action:_HTTP_Request).
+
+### 업데이트 시 주의
+
+뉴스 모듈 외에 `deal_filter.py`, `deal_bridge.py`, `docker-compose.deals.yml`도 복사해야 합니다. 최초 설치에서만 `deal_watchlist.json`을 복사하고, 이후에는 사용자 설정 파일을 보존하세요. 당근 연동을 유지하려면 재생성 시 위 두 Compose 파일을 함께 지정해야 합니다.

@@ -1,0 +1,35 @@
+{
+  "enabled": false,
+  "region": {
+    "id": 1635,
+    "name": "경기도 군포시 산본2동"
+  },
+  "max_price_percent": 50,
+  "require_unopened": true,
+  "items": [
+    {
+      "id": "galaxy_watch9_44mm",
+      "name": "갤럭시 워치9 44mm",
+      "reference_price": 510000,
+      "reference_type": "user_defined_new_price",
+      "required_patterns": ["갤럭시|galaxy", "워치\\s*9(?![0-9])|watch\\s*9(?![0-9])", "44\\s*(?:mm|미리|밀리)"],
+      "excluded_title_patterns": ["스트랩|보호필름|충전독|케이스|밴드|부품|박스\\s*만", "울트라|ultra|클래식|classic"]
+    },
+    {
+      "id": "bluetooth_speaker",
+      "name": "블루투스 스피커",
+      "reference_price": 200000,
+      "reference_type": "user_defined_new_price",
+      "required_patterns": ["블루투스|bluetooth", "스피커|speaker"],
+      "excluded_title_patterns": ["케이스|부품|박스\\s*만|이어폰|헤드폰|수리용"]
+    },
+    {
+      "id": "arm_laptop",
+      "name": "ARM 기반 노트북",
+      "reference_price": 1200000,
+      "reference_type": "user_defined_new_price",
+      "required_patterns": ["노트북|laptop|맥북|macbook|서피스|surface", "\\barm\\b|스냅드래곤|snapdragon|(?:맥북|macbook|애플|apple).{0,30}\\bm[1-9][0-9]?\\b"],
+      "excluded_title_patterns": ["인텔|intel|라이젠|ryzen|셀러론|celeron|부품|박스\\s*만|파우치|케이스|충전기"]
+    }
+  ]
+}
