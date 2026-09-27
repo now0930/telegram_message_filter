@@ -153,59 +153,23 @@ docker compose logs -f telegram-filter
 
 `.env`의 채널 목록 변경도 `restart`만 하지 말고 `up -d --force-recreate`로 환경 변수를 다시 읽도록 합니다.
 
-### 새 디렉터리로 clone 후 재시작
+### 단일 운영 디렉터리 업데이트
 
-기존 실행 디렉터리를 보존한 채 새 버전을 받아 교체하려면 다음 순서로 실행합니다. `NEW` 디렉터리가 이미 있으면 다른 이름을 사용하세요.
+앞으로는 새 `next` 디렉터리를 만들지 않습니다. 임시 디렉터리에 최신 저장소를 clone하고, 검증이 끝나면 기존 운영 디렉터리 `$HOME/telegram_message_filter`의 코드만 교체합니다. 임시 clone은 작업이 끝나면 자동 삭제되며 `.env`, `*.session*`, `*.sqlite3`, 실제 `deal_watchlist.json`은 유지됩니다.
 
-```sh
-set -e
-
-OLD="$HOME/telegram_message_filter"
-NEW="$HOME/telegram_message_filter_next"
-
-test ! -e "$NEW" || { echo "$NEW already exists" >&2; exit 1; }
-git clone https://github.com/OWNER/REPOSITORY.git "$NEW"
-git -C "$NEW" log -1 --oneline
-
-# 인증·세션·중복 기록·사용자 관심품목은 새 clone에 복사합니다.
-for f in .env telegram_session.session news_history.sqlite3 deal_notifications.sqlite3 deal_watchlist.json; do
-  if [ -e "$OLD/$f" ]; then
-    cp -a "$OLD/$f" "$NEW/telegram_message_filter/$f"
-  fi
-done
-
-docker compose \
-  -f "$OLD/docker-compose.yml" \
-  -f "$OLD/docker-compose.deals.yml" \
-  down
-
-cd "$NEW/telegram_message_filter"
-docker compose \
-  -f docker-compose.yml \
-  -f docker-compose.deals.yml \
-  up -d --force-recreate telegram-filter
-docker compose \
-  -f docker-compose.yml \
-  -f docker-compose.deals.yml \
-  logs -f --tail=100 telegram-filter
-```
-
-`git log`에서 원격에 푸시한 최신 커밋을 확인한 뒤 서비스를 시작하세요. `.env`, `*.session*`, `*.sqlite3`는 인증·운영 데이터이므로 clone만으로 복원되지 않습니다. 기존 컨테이너를 먼저 내린 뒤 새 디렉터리에서 시작해야 고정된 컨테이너 이름 충돌을 피할 수 있습니다.
-
-위 절차를 자동화하려면 저장소 루트에서 다음 스크립트를 사용합니다. 기본값은 사용자의 홈 디렉터리 아래 `telegram_message_filter`와 `telegram_message_filter_next`입니다. 새 디렉터리가 이미 있으면 중단하며 기존 디렉터리를 삭제하지 않습니다.
+저장소 루트에서 실행하세요.
 
 ```sh
-./scripts/clone_restart.sh
+SINGLE_RUNTIME_CONFIRM=YES ./scripts/update_single_runtime.sh
 ```
 
-비대화형 실행은 대상 경로와 원격 저장소를 확인한 뒤 다음처럼 명시적으로 승인합니다.
+기존 `clone_restart.sh`도 같은 단일 디렉터리 업데이트 동작을 호출합니다.
 
 ```sh
-CLONE_RESTART_CONFIRM=YES \
-OLD_DIR="$HOME/telegram_message_filter" \
-NEW_DIR="$HOME/telegram_message_filter_next" \
-./scripts/clone_restart.sh
+SINGLE_RUNTIME_CONFIRM=YES ./scripts/clone_restart.sh
 ```
+
+스크립트는 Compose 설정을 먼저 검증하고, 업데이트 실패 시 이전 코드 파일을 복원한 뒤 서비스를 다시 시작합니다. 이미 존재하는 `telegram_message_filter_next*` 또는 `telegram_message_filter_backup*` 디렉터리는 자동 삭제하지 않으므로, 새 운영본이 정상임을 확인한 후 직접 정리하세요.
 
 ## 당근 가격 알림 — 안드로이드 알림 연동
 
