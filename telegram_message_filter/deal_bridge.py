@@ -20,8 +20,10 @@ logger = logging.getLogger(__name__)
 
 def listing_from_notification(raw, config):
     """Only use explicit facts in the notification; never assume missing price/region/status."""
-    if '산본2동' not in raw or config['region']['id'] != 1635:
-        return None, '알림에서 산본2동을 확인하지 못함'
+    region = config['region']
+    region_name = region['name']
+    if not region_name or region_name not in raw:
+        return None, '알림에서 설정 지역을 확인하지 못함'
     prices = set()
     for match in re.finditer(r'(?<![\d.])([0-9][0-9,]*(?:\.[0-9]+)?)\s*(만)?\s*원', raw):
         from decimal import Decimal
@@ -43,7 +45,7 @@ def listing_from_notification(raw, config):
     # Retain all notification lines for accessory/model exclusions as well as matching.
     title = ' '.join(title_lines)[:1000]
     identity = url or hashlib.sha256(raw.encode()).hexdigest()
-    return Listing(identity, url, title, raw, prices.pop(), 1635, 'on_sale'), ''
+    return Listing(identity, url, title, raw, prices.pop(), region['id'], 'on_sale'), ''
 
 
 class DealInbox:

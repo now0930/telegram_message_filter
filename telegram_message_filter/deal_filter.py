@@ -54,7 +54,7 @@ def load_watchlist(path):
 def evaluate(listing, item, config):
     """Fail closed on unavailable status/region, price placeholders, or ambiguous condition."""
     if listing.status != 'on_sale' or listing.region_id != config['region']['id']:
-        return False, '판매 중 또는 산본2동 매물로 확인되지 않음'
+        return False, '판매 중 또는 설정 지역 매물로 확인되지 않음'
     if type(listing.price) is not int or listing.price <= 0:
         return False, '확정 판매가격 없음'
     ceiling = item['reference_price'] * config['max_price_percent'] // 100

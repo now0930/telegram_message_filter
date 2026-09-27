@@ -9,13 +9,15 @@ die() {
   exit 1
 }
 
-old_dir="${OLD_DIR:-/home/now0930/telegram_message_filter}"
-new_dir="${NEW_DIR:-/home/now0930/telegram_message_filter_next}"
-repo_url="${REPO_URL:-https://github.com/now0930/telegram_message_filter.git}"
+old_dir="${OLD_DIR:-$HOME/telegram_message_filter}"
+new_dir="${NEW_DIR:-$HOME/telegram_message_filter_next}"
+script_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+repo_url="${REPO_URL:-$(git -C "$script_root" config --get remote.origin.url 2>/dev/null || true)}"
 
 [[ -d "$old_dir" ]] || die "기존 실행 디렉터리가 없습니다: $old_dir"
 [[ ! -e "$new_dir" ]] || die "새 디렉터리가 이미 존재합니다: $new_dir"
 [[ -f "$old_dir/.env" ]] || die "기존 .env를 찾을 수 없습니다: $old_dir/.env"
+[[ -n "$repo_url" ]] || die "원격 저장소 주소가 없습니다. REPO_URL을 지정하세요."
 command -v git >/dev/null 2>&1 || die "git이 필요합니다."
 command -v docker >/dev/null 2>&1 || die "docker가 필요합니다."
 

@@ -9,31 +9,42 @@ sys.path.insert(0, str(Path(__file__).parents[1] / 'telegram_message_filter'))
 from deal_bridge import DealBridge, listing_from_notification
 from deal_filter import load_watchlist
 from aiohttp.test_utils import TestClient, TestServer
+from deal_test_config import CONFIG
 
-BASE = Path(__file__).parents[1] / 'telegram_message_filter' / 'deal_watchlist.json'
-RAW = '갤럭시 워치9 44mm 미개봉\n경기도 군포시 산본2동 판매중\n255,000원\nhttps://www.daangn.com/kr/buy-sell/test/'
+RAW = '예시 시계 44mm 미개봉\n테스트 지역 판매중\n50,000원\nhttps://www.daangn.com/kr/buy-sell/test/'
 TOKEN = 'a' * 40
 
 
 class NotificationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.temp.cleanup()
+
     def test_explicit_fields_and_korean_price(self):
-        config = load_watchlist(BASE)
-        listing, _ = listing_from_notification(RAW.replace('255,000원', '25.5만원'), config)
-        self.assertEqual(listing.price, 255000)
-        self.assertEqual(listing.region_id, 1635)
+        config = load_watchlist(self._write_config())
+        listing, _ = listing_from_notification(RAW.replace('50,000원', '5만원'), config)
+        self.assertEqual(listing.price, 50000)
+        self.assertEqual(listing.region_id, CONFIG['region']['id'])
 
     def test_missing_ambiguous_or_sold_is_not_assumed(self):
-        config = load_watchlist(BASE)
-        for text in (RAW.replace('산본2동', '산본1동'), RAW.replace('판매중', ''),
-                     RAW.replace('판매중', '거래완료'), RAW + '\n정가 510,000원', RAW.replace('255,000원', '')):
+        config = load_watchlist(self._write_config())
+        for text in (RAW.replace('테스트 지역', '다른 지역'), RAW.replace('판매중', ''),
+                     RAW.replace('판매중', '거래완료'), RAW + '\n정가 100,000원', RAW.replace('50,000원', '')):
             self.assertIsNone(listing_from_notification(text, config)[0])
+
+    def _write_config(self):
+        path = Path(self.temp.name) / 'config.json'
+        path.write_text(json.dumps(CONFIG, ensure_ascii=False))
+        return path
 
 
 class WebhookTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.path = Path(self.temp.name) / 'config.json'
-        self.path.write_text(BASE.read_text())
+        self.path.write_text(json.dumps(CONFIG, ensure_ascii=False))
         self.send = AsyncMock()
         self.bridge = DealBridge(str(self.path), str(Path(self.temp.name) / 'inbox.sqlite3'), TOKEN, self.send)
         self.client = TestClient(TestServer(self.bridge.application()))
@@ -71,7 +82,7 @@ class WebhookTests(unittest.IsolatedAsyncioTestCase):
             await self.client.post('/deals/notification', data=RAW.encode(), headers=self.headers)
             await self.bridge.process_once()
         self.send.assert_awaited_once()
-        self.assertIn('255,000원', self.send.call_args.args[0])
+        self.assertIn('50,000원', self.send.call_args.args[0])
         await self.client.post('/deals/notification', data=(RAW+'\n재알림').encode(), headers=self.headers)
         await self.bridge.process_once()
         self.send.assert_awaited_once()
@@ -79,7 +90,7 @@ class WebhookTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_incomplete_notification_is_recorded_without_fabrication(self):
         self.enable()
-        await self.client.post('/deals/notification', data='갤럭시 워치9 새 알림'.encode(), headers=self.headers)
+        await self.client.post('/deals/notification', data='예시 시계 새 알림'.encode(), headers=self.headers)
         await self.bridge.process_once()
         self.send.assert_not_awaited()
         self.assertEqual(self.bridge.inbox.status()['counts'], {'insufficient': 1})

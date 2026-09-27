@@ -1,4 +1,4 @@
-# now0930.pe.kr Apache 컨테이너와 공유하는 내부 네트워크.
+# Reverse-proxy 컨테이너와 공유하는 내부 네트워크.
 # 호스트/인터넷에 8090 포트를 직접 공개하지 않습니다.
 services:
   telegram-filter:
