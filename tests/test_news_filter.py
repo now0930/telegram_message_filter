@@ -12,7 +12,7 @@ from news_filter import History, NewsFilter, fingerprint, qualifies, render_brie
 
 
 def analysis(**changes):
-    value = dict(topic='AI', importance=4, depth=3, evidence=4, promotional=False,
+    value = dict(topic='AI반도체·HBM·HBF', importance=4, depth=3, evidence=4, promotional=False,
                  title='AI 반도체 공급 확대', facts=['회사가 공급량을 30% 확대한다고 발표했다.'],
                  why_it_matters='공급 제약 완화 가능성.', uncertainty='실제 출하량은 확인 필요.',
                  reason='공식 공급계획과 전년 대비 수치가 있다.')
