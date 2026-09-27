@@ -199,7 +199,7 @@ class BondMonitor:
             label = None
         bp_text = '전일 수익률 관측치 없음' if bp is None else f'수익률 {bp:+.1f}bp'
         message = ('[MOCK 테스트]\n' if self.mock else '') + (
-            f"[🚨 국내 회사채 급락 감지]\n- 종목명: {bond['name']} (신용등급: {bond.get('rating', '미확인')})\n"
+            f"[🚨 국내 {'국채' if bond.get('bond_type') == 'government' else '회사채'} 급락 감지]\n- 종목명: {bond['name']} (신용등급: {bond.get('rating', '미확인')})\n"
             f"- 비교일: {data['previous_date']} → {data['date']}\n"
             f"- 변동폭: 가격 {pct:+.2f}% ({bp_text})\n"
             f"- AI 분석 결과: ⚠️ {label or '분류 보류 (뉴스 부족 또는 AI 응답 오류)'}\n"

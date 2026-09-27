@@ -52,6 +52,7 @@ tracked_files=(
   .env.example .gitignore README.md deal_bridge.py deal_filter.py
   docker-compose.deals.yml docker-compose.yml main.py news_filter.py
   portal_verifier.py requirements.txt bond_monitor.py bond_watchlist.example.json
+  bond_watchlist.json
 )
 
 printf '임시 clone: %s\n' "$repo_url"

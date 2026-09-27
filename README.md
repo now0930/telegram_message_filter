@@ -259,7 +259,7 @@ MacroDroid 공식 문서: [알림 트리거](https://www.macrodroidforum.com/wik
 
 ### 설정 및 기존 서비스와 동시 실행
 
-실행 디렉터리에서 `cp bond_watchlist.example.json bond_watchlist.json` 후 실제 회사채 ISIN·발행사·등급을 넣습니다. 이 개인 설정은 Git에서 제외되며 단일 디렉터리 업데이트로 보존됩니다.
+`bond_watchlist.json`에는 국채·회사채 감시 목록이 저장되어 저장소에 함께 배포됩니다. 목록을 변경하면 이 파일을 커밋하고 push한 뒤 단일 디렉터리 업데이트를 실행합니다. 인증정보와 세션 파일은 계속 Git에 올리지 않습니다.
 
 `.env` 설정:
 
@@ -318,7 +318,7 @@ docker compose -f docker-compose.yml -f docker-compose.deals.yml up -d telegram-
 배포 순서:
 
 1. 저장소 변경사항을 pull한 뒤 `SINGLE_RUNTIME_CONFIRM=YES ./scripts/update_single_runtime.sh`로 기존 단일 운영 디렉터리를 갱신합니다.
-2. 운영 디렉터리에서 `bond_watchlist.example.json`을 `bond_watchlist.json`으로 복사하고 실제 회사채 정보를 입력합니다. 기존 파일이 있으면 덮어쓰지 않습니다.
+2. 저장소의 `bond_watchlist.json`이 운영 디렉터리로 자동 복사됩니다. 개인 목록으로 바꾸려면 저장소 파일을 수정한 뒤 커밋·push하고 다시 업데이트합니다.
 3. 운영 `.env`에 KIS 키를 넣고 `BOND_MONITOR_ENABLED=true`를 설정합니다.
 4. 위 Compose 재생성 명령으로 설정을 적용합니다. 로그의 `회사채 감시 예약 완료`를 확인합니다.
 

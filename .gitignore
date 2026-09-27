@@ -8,5 +8,3 @@ __pycache__/
 *.sqlite3-*
 
 .venv/
-
-bond_watchlist.json
