@@ -66,33 +66,20 @@ cd telegram_message_filter/telegram_message_filter
 cp .env.example .env
 ```
 
-`.env`에 다음 항목을 설정합니다.
+### 전체 흐름과 `.env` 구성
 
-| 설정 | 설명 |
-| --- | --- |
-| `TELEGRAM_API_ID` | Telegram 사용자 앱 API ID |
-| `TELEGRAM_API_HASH` | Telegram 사용자 앱 API Hash |
-| `TARGET_CHANNELS` | 쉼표로 구분한 채널 사용자명 또는 ID |
-| `DESTINATION_CHAT_ID` | 전송할 채팅 ID 또는 사용자명 |
-| `OLLAMA_HOST` | 기본값 `http://ollama:11434` |
-| `OLLAMA_MODEL` | 기본값 `hf.co/sky7350/Mica-v0.1-4B:Q5_K_M` |
-| `MIN_IMPORTANCE` | 4(기본) 또는 5(최상위 중요 사건만) |
-| `DEDUP_HOURS` | 중복 비교 기간, 기본 72시간 |
-| `PORTAL_MAX_AGE_DAYS` | `@best_article` 포털 기사의 최대 경과 일수, 기본 7 (1~30) |
-| `NEWS_DB_PATH` | 기본 `news_history.sqlite3`, Compose 바인드 마운트에 저장 |
+모든 기능은 하나의 `telegram-filter` 컨테이너와 하나의 Telegram Userbot 세션을 공유합니다. 입력은 세 갈래입니다. Telegram 채널 글은 뉴스 필터로 들어가고, MacroDroid의 당근 알림은 웹훅으로 들어가며, 채권 모니터는 KIS API에서 직접 가격을 읽습니다. 각 입력은 자체 판정을 거친 뒤 `DESTINATION_CHAT_ID`로만 전송됩니다.
 
-### `.env` 전체 구성과 기능 연결
-
-`.env`는 하나의 서비스가 공유하는 네 가지 설정 묶음으로 구성됩니다.
+`.env`는 이 흐름을 제어하는 설정 파일입니다. 아래 표에서 각 변수는 한 번만 설명합니다.
 
 | 묶음 | 주요 변수 | 역할 | 입력·저장 위치 |
 | --- | --- | --- | --- |
-| Telegram Userbot | `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TARGET_CHANNELS`, `DESTINATION_CHAT_ID` | 기존 Telegram 계정으로 여러 채널을 읽고, 통과한 뉴스·채권·당근 알림을 목적지 채팅에 보냅니다. | `telegram_session.session`은 로컬에만 저장 |
-| 뉴스 필터·Ollama | `OLLAMA_HOST`, `OLLAMA_MODEL`, `MIN_IMPORTANCE`, `DEDUP_HOURS`, `NEWS_DB_PATH`, `PORTAL_MAX_AGE_DAYS` | 채널 글을 AI로 중요도·근거·깊이 평가하고 중복을 제거합니다. `@best_article`은 포털 기사 대조를 추가합니다. | Ollama 컨테이너와 `news_history.sqlite3` |
-| 당근 알림 | `DEALS_WEBHOOK_TOKEN`, `DEALS_CONFIG_PATH`, `DEALS_DB_PATH`, `DEALS_PORT` | Android MacroDroid가 당근 알림을 HTTPS 웹훅으로 보내면 지역·품목·가격 조건을 판정해 Telegram으로 전달합니다. | `deal_watchlist.json`, `deal_notifications.sqlite3` |
-| 채권 모니터 | `BOND_MONITOR_ENABLED`, `KIS_APP_KEY`, `KIS_APP_SECRET`, `BOND_WATCHLIST_PATH`, `BOND_DB_PATH`, `BOND_HOUR`, `BOND_MINUTE`, `BOND_INTERVAL_MINUTES` | KIS에서 가격·수익률을 조회하고 급락 조건을 감지해 같은 Telegram 목적지로 알립니다. 기존 Userbot 연결을 공유합니다. | `bond_watchlist.json`, `bond_history.sqlite3` |
-
-실행 흐름은 `TARGET_CHANNELS` → 뉴스 필터 → `DESTINATION_CHAT_ID`이고, 당근은 `DEALS_PORT` 웹훅 → 가격 필터 → 같은 목적지, 채권은 KIS → 급락 필터 → 같은 목적지입니다. 세 기능은 한 `telegram-filter` 컨테이너에서 실행되지만, 데이터베이스와 감시 목록은 서로 분리됩니다. `BOND_MONITOR_ENABLED=false`이면 채권만 비활성화되고 뉴스·당근 기능은 계속 동작합니다. `DEALS_WEBHOOK_TOKEN`이 비어 있으면 당근 웹훅만 비활성화됩니다.
+| 묶음 | 변수 | 기능과 저장 위치 |
+| --- | --- | --- |
+| Telegram 연결 | `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TARGET_CHANNELS`, `DESTINATION_CHAT_ID` | 채널을 읽고 세 기능의 통과 알림을 목적지로 전송합니다. 세션은 `telegram_session.session`에 저장하며 Git에 올리지 않습니다. |
+| 뉴스 필터 | `OLLAMA_HOST`, `OLLAMA_MODEL`, `MIN_IMPORTANCE`, `DEDUP_HOURS`, `PORTAL_MAX_AGE_DAYS`, `NEWS_DB_PATH` | Ollama가 중요도·근거·깊이를 평가하고 중복을 제거합니다. `@best_article`은 포털 대조를 추가하며 기록은 `news_history.sqlite3`에 저장합니다. |
+| 당근 웹훅 | `DEALS_WEBHOOK_TOKEN`, `DEALS_CONFIG_PATH`, `DEALS_DB_PATH`, `DEALS_PORT` | MacroDroid → 웹훅 → `deal_watchlist.json` 가격·지역 판정 → Telegram 전송 순서입니다. 처리 기록은 `deal_notifications.sqlite3`에 저장합니다. 토큰이 비어 있으면 비활성화됩니다. |
+| 채권 모니터 | `BOND_MONITOR_ENABLED`, `KIS_APP_KEY`, `KIS_APP_SECRET`, `BOND_WATCHLIST_PATH`, `BOND_DB_PATH`, `BOND_HOUR`, `BOND_MINUTE`, `BOND_INTERVAL_MINUTES` | KIS → 가격·수익률 판정 → Telegram 전송 순서입니다. 목록은 `bond_watchlist.json`, 기록은 `bond_history.sqlite3`에 저장합니다. `BOND_MONITOR_ENABLED=false`이면 이 기능만 꺼집니다. |
 
 감시 계정은 대상 채널에 가입되어 있어야 하며 목적지에 글을 쓸 권한이 있어야 합니다. 개인·봇 계정은 감시 채널로 지원하지 않습니다. 목적지는 감시 채널과 달라야 합니다. `.env`와 `*.session*`은 인증 정보이므로 Git에 올리지 않습니다.
 
