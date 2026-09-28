@@ -36,7 +36,12 @@ news_filter = None
 
 
 async def handler(event):
-    text = event.message.text
+    text = event.message.text or ''
+    # TextUrl entities carry addresses that are absent from visible message text.
+    for entity in getattr(event.message, 'entities', None) or []:
+        url = getattr(entity, 'url', None)
+        if isinstance(url, str) and url.startswith(('https://', 'http://')) and url not in text:
+            text += '\n' + url
     if not text:
         return
     logger.info("새 메시지 수신: chat=%s id=%s", event.chat_id, event.message.id)

@@ -30,6 +30,12 @@ class HandlerTests(unittest.IsolatedAsyncioTestCase):
         client.send_message.assert_awaited_once_with(-123, '요약: 뉴스\nhttps://t.me/test_channel/7',
                                                     parse_mode=None, link_preview=False)
 
+    async def test_hidden_link_is_included_in_analysis(self):
+        run, event, client, editor = self.setup_handler()
+        event.message.entities = [SimpleNamespace(url='https://example.com/article')]
+        await run(event)
+        self.assertIn('https://example.com/article', editor.process.call_args.args[0])
+
     async def test_private_source(self):
         run, event, client, _ = self.setup_handler()
         event.get_chat.return_value.username = None

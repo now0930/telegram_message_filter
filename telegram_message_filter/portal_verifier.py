@@ -6,7 +6,7 @@ from html.parser import HTMLParser
 import json
 import logging
 import re
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urljoin, urlsplit
 
 import httpx
 
@@ -62,6 +62,12 @@ def article_url(url):
     except ValueError:
         return None
     host = (parsed.hostname or '').lower()
+    if host in ('news.naver.com', 'finance.naver.com') and parsed.path in ('/main/read.naver', '/news/news_read.naver'):
+        query = parse_qs(parsed.query)
+        office = query.get('oid', query.get('office_id', ['']))[0]
+        article = query.get('aid', query.get('article_id', ['']))[0]
+        if re.fullmatch(r'\d{3}', office) and re.fullmatch(r'\d{8,12}', article):
+            return f'https://n.news.naver.com/mnews/article/{office}/{article}'
     if host == 'n.news.naver.com' and re.fullmatch(r'/(?:mnews/)?article/\d{3}/\d{8,12}', parsed.path):
         parts = parsed.path.split('/')
         return f'https://n.news.naver.com/mnews/article/{parts[-2]}/{parts[-1]}'
@@ -71,9 +77,9 @@ def article_url(url):
 
 
 def search_links(markup):
-    links = re.findall(r'https?://(?:n\.news\.naver\.com|v\.daum\.net)/[^\s<>"\']+',
-                       html.unescape(markup))
-    return list(dict.fromkeys(clean for link in links if (clean := article_url(link))))
+    links = re.findall(r'https?://[^\s<>"\']+', html.unescape(markup))
+    return list(dict.fromkeys(clean for link in links
+                              if (clean := article_url(link.rstrip(').,')))))
 
 
 def normalize_query(raw_query):
@@ -198,17 +204,50 @@ class PortalVerifier:
             articles = await asyncio.gather(*(read(url) for url in urls))
             return [dict(article, id=index + 1) for index, article in enumerate(a for a in articles if a)]
 
+    async def resolve_short_link(self, client, url):
+        """Follow only naver.me hops; return an approved article URL before fetching it."""
+        for _ in range(3):
+            approved = article_url(url)
+            if approved:
+                return approved
+            if not re.fullmatch(r'https?://naver\.me/[A-Za-z0-9]+', url):
+                return None
+            async with client.stream('GET', url) as response:
+                if response.status_code not in (301, 302, 303, 307, 308):
+                    return None
+                location = response.headers.get('location')
+                if not location:
+                    return None
+                url = urljoin(url, location)
+        return article_url(url)
+
     async def linked_articles(self, text):
         """Read up to two supported article links without following redirects."""
         urls = search_links(text)[:2]
+        short_links = list(dict.fromkeys(re.findall(r'https?://naver\.me/[A-Za-z0-9]+', text)))[:2]
+        if not urls and not short_links:
+            if re.search(r'https?://', text):
+                logger.info('링크 본문 미수집: 지원하는 네이버·다음 직접 기사 주소 없음')
+            return []
         async with httpx.AsyncClient(timeout=12, follow_redirects=False) as client:
+            for short_url in short_links:
+                try:
+                    resolved = await asyncio.wait_for(self.resolve_short_link(client, short_url), timeout=15)
+                    if resolved and resolved not in urls:
+                        urls.append(resolved)
+                    logger.info('단축 링크 확인: %s → %s', short_url, resolved or '지원 기사 아님')
+                except (httpx.HTTPError, ValueError, TimeoutError):
+                    logger.warning('단축 링크 확인 실패: %s', short_url)
             articles = []
-            for url in urls:
+            for url in urls[:2]:
                 try:
                     markup = await asyncio.wait_for(self._html(client, url), timeout=15)
                     article = parse_article(markup, url, self.max_age_days)
                     if article:
                         articles.append(article)
+                        logger.info('링크 본문 수집 완료: %s (%d자)', url, len(article['body']))
+                    else:
+                        logger.info('링크 본문 제외: 본문·제목·발행일 조건 미충족: %s', url)
                 except (httpx.HTTPError, ValueError, TimeoutError):
                     logger.warning('게시글 링크 본문 읽기 실패: %s', url)
             return articles

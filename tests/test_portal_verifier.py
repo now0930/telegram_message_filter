@@ -135,3 +135,16 @@ class SearchTests(unittest.IsolatedAsyncioTestCase):
         with patch('portal_verifier.httpx.AsyncClient', return_value=client), self.assertLogs('portal_verifier', level='WARNING'):
             self.assertEqual(await PortalVerifier().search('배터리'), [])
         self.assertNotIn('127.0.0.1', visited)
+
+class ShortLinkTests(unittest.IsolatedAsyncioTestCase):
+    async def test_resolves_only_approved_destination(self):
+        import httpx
+        for destination, expected in [(URL, URL), ('http://127.0.0.1/private', None)]:
+            calls = []
+            def respond(request):
+                calls.append(str(request.url))
+                return httpx.Response(302, headers={'location': destination})
+            async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+                result = await PortalVerifier().resolve_short_link(client, 'https://naver.me/abc123')
+            self.assertEqual(result, expected)
+            self.assertEqual(calls, ['https://naver.me/abc123'])
