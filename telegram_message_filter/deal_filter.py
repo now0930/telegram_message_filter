@@ -17,6 +17,31 @@ class Listing:
     status: str  # Explicitly normalized by a verified source: on_sale/reserved/sold/unknown.
 
 
+def _validate_item(item, seen_ids):
+    """Validate one watchlist item and reject ambiguous configuration early."""
+    item_id = item.get('id')
+    if not isinstance(item_id, str) or not item_id or item_id in seen_ids:
+        raise ValueError('품목 ID 누락 또는 중복')
+    seen_ids.add(item_id)
+    if not isinstance(item.get('name'), str) or not item['name']:
+        raise ValueError('품목 이름 누락')
+    if type(item.get('reference_price')) is not int or item['reference_price'] <= 0:
+        raise ValueError('기준 가격은 양의 정수여야 합니다.')
+    target = item.get('target_price')
+    if target is not None and (type(target) is not int or target <= 0):
+        raise ValueError('목표 가격은 양의 정수여야 합니다.')
+    if item.get('reference_type') != 'user_defined_new_price':
+        raise ValueError('지원하지 않는 기준 가격 유형')
+    for key in ('required_patterns', 'excluded_title_patterns'):
+        patterns = item.get(key)
+        if not isinstance(patterns, list) or (key == 'required_patterns' and not patterns):
+            raise ValueError('품목 패턴 설정 오류')
+        for pattern in patterns:
+            if not isinstance(pattern, str) or not pattern.strip():
+                raise ValueError('빈 품목 패턴')
+            re.compile(pattern, re.I)
+
+
 def load_watchlist(path):
     config = json.loads(Path(path).read_text(encoding='utf-8'))
     if type(config.get('enabled')) is not bool or config.get('require_unopened') is not True:
@@ -31,26 +56,26 @@ def load_watchlist(path):
         raise ValueError('관심 품목이 필요합니다.')
     seen = set()
     for item in items:
-        if not isinstance(item.get('id'), str) or not item['id'] or item['id'] in seen:
-            raise ValueError('품목 ID 누락 또는 중복')
-        seen.add(item['id'])
-        if not isinstance(item.get('name'), str) or not item['name']:
-            raise ValueError('품목 이름 누락')
-        if type(item.get('reference_price')) is not int or item['reference_price'] <= 0:
-            raise ValueError('기준 가격은 양의 정수여야 합니다.')
-        if 'target_price' in item and (type(item['target_price']) is not int or item['target_price'] <= 0):
-            raise ValueError('목표 가격은 양의 정수여야 합니다.')
-        if item.get('reference_type') != 'user_defined_new_price':
-            raise ValueError('지원하지 않는 기준 가격 유형')
-        for key in ('required_patterns', 'excluded_title_patterns'):
-            patterns = item.get(key)
-            if not isinstance(patterns, list) or (key == 'required_patterns' and not patterns):
-                raise ValueError('품목 패턴 설정 오류')
-            for pattern in patterns:
-                if not isinstance(pattern, str) or not pattern.strip():
-                    raise ValueError('빈 품목 패턴')
-                re.compile(pattern, re.I)
+        _validate_item(item, seen)
     return config
+
+
+def _price_ceiling(item, config):
+    target_price = item.get('target_price')
+    if target_price is not None:
+        return target_price
+    return item['reference_price'] * config['max_price_percent'] // 100
+
+
+def _has_unopened_evidence(text):
+    return bool(re.search(r'미개봉|미\s*개봉|미개봉씰|밀봉|씰\s*미훼손|unopened|factory\s*sealed', text, re.I))
+
+
+def _contradicts_unopened_claim(text):
+    return bool(re.search(
+        r'미\s*개봉\s*(?:급|아님|아니|아닙|같은|수준)|개봉\s*(?:후|했|하였|해서|미사용|만|됨|상태)|'
+        r'사용\s*(?:했|하였)|전시품|리퍼|중고품|테스트\s*(?:했|하였)|씰\s*(?:훼손|제거)|밀봉\s*(?:훼손|제거)',
+        text))
 
 
 def evaluate(listing, item, config):
@@ -59,9 +84,7 @@ def evaluate(listing, item, config):
         return False, '판매 중 또는 설정 지역 매물로 확인되지 않음'
     if type(listing.price) is not int or listing.price <= 0:
         return False, '확정 판매가격 없음'
-    ceiling = item.get('target_price')
-    if ceiling is None:
-        ceiling = item['reference_price'] * config['max_price_percent'] // 100
+    ceiling = _price_ceiling(item, config)
     if listing.price > ceiling:
         return False, '가격 상한 초과'
     text = listing.title + '\n' + listing.description
@@ -71,9 +94,9 @@ def evaluate(listing, item, config):
         return False, '액세서리 또는 제외 모델'
     if re.search(r'삽니다|구매합니다|구매희망|구매\s*원해|구해요|구합니다|예약금|선입금|보증금|계약금|월\s*\d+\s*만?원|렌탈|대여|교환만|가격\s*제안|가격\s*문의', text):
         return False, '구매글/부분 가격/대여 등 제외'
-    if re.search(r'미\s*개봉\s*(?:급|아님|아니|아닙|같은|수준)|개봉\s*(?:후|했|하였|해서|미사용|만|됨|상태)|사용\s*(?:했|하였)|전시품|리퍼|중고품|테스트\s*(?:했|하였)|씰\s*(?:훼손|제거)|밀봉\s*(?:훼손|제거)', text):
+    if _contradicts_unopened_claim(text):
         return False, '개봉/사용 또는 미개봉과 모순되는 설명'
-    if not re.search(r'미개봉|미\s*개봉|미개봉씰|밀봉|씰\s*미훼손|unopened|factory\s*sealed', text, re.I):
+    if not _has_unopened_evidence(text):
         return False, '명시적인 미개봉 근거 없음'
     if item.get('target_price') is not None:
         return True, f"직접 설정한 목표 가격 {ceiling:,}원 이하 및 판매자 미개봉 표기"

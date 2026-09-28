@@ -162,6 +162,18 @@ def qualifies(result, minimum_importance=4):
     )
 
 
+def validate_duplicate_match(match, batch):
+    """Validate the model's duplicate decision before using it for filtering."""
+    valid_ids = {0, *(row['id'] for row in batch)}
+    if (not isinstance(match, dict)
+            or type(match.get('duplicate_id')) is not int
+            or type(match.get('material_update')) is not bool
+            or not isinstance(match.get('reason'), str)
+            or match['duplicate_id'] not in valid_ids):
+        raise ValueError('중복 판정 형식 오류')
+    return match
+
+
 class History:
     def __init__(self, path, hours=72):
         if hours <= 0:
@@ -250,13 +262,10 @@ class NewsFilter:
             for start in range(0, len(recent), 15):
                 batch = recent[start:start + 15]
                 previous = [{'id': row['id'], 'news': json.loads(row['analysis'])} for row in batch]
-                match = json.loads(await self._ask(DUPLICATE_PROMPT,
-                                   {'new': result, 'previous': previous}, DUPLICATE_SCHEMA))
-                if (not isinstance(match, dict) or type(match.get('duplicate_id')) is not int
-                    or type(match.get('material_update')) is not bool
-                    or not isinstance(match.get('reason'), str)
-                    or match['duplicate_id'] not in {0, *(row['id'] for row in batch)}):
-                    raise ValueError('중복 판정 형식 오류')
+                match = validate_duplicate_match(
+                    json.loads(await self._ask(DUPLICATE_PROMPT,
+                                                {'new': result, 'previous': previous}, DUPLICATE_SCHEMA)),
+                    batch)
                 if match['duplicate_id']:
                     if not match['material_update']:
                         return f"같은 사건 중복 제외: {match['reason']}"

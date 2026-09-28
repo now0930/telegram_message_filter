@@ -16,6 +16,28 @@ from aiohttp import web
 from deal_filter import Listing, evaluate, load_watchlist, render_alert
 
 logger = logging.getLogger(__name__)
+DAANGN_URL = re.compile(r'https://www\.daangn\.com/kr/buy-sell/[^\s<>"\']+')
+PRICE_PATTERN = re.compile(r'(?<![\d.])([0-9][0-9,]*(?:\.[0-9]+)?)\s*(만)?\s*원')
+
+
+def _extract_prices(raw):
+    """Return distinct integer prices explicitly present in a notification."""
+    from decimal import Decimal
+    prices = set()
+    for match in PRICE_PATTERN.finditer(raw):
+        value = Decimal(match[1].replace(',', '')) * (10000 if match[2] else 1)
+        if value == int(value):
+            prices.add(int(value))
+    return prices
+
+
+def _extract_listing_url(raw):
+    """Keep only the path of the first HTTPS 당근 listing URL."""
+    urls = DAANGN_URL.findall(raw)
+    if not urls:
+        return ''
+    parsed = urlsplit(urls[0].rstrip(').,'))
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, '', ''))
 
 
 def listing_from_notification(raw, config):
@@ -24,23 +46,14 @@ def listing_from_notification(raw, config):
     region_name = region['name']
     if not region_name or region_name not in raw:
         return None, '알림에서 설정 지역을 확인하지 못함'
-    prices = set()
-    for match in re.finditer(r'(?<![\d.])([0-9][0-9,]*(?:\.[0-9]+)?)\s*(만)?\s*원', raw):
-        from decimal import Decimal
-        value = Decimal(match[1].replace(',', '')) * (10000 if match[2] else 1)
-        if value == int(value):
-            prices.add(int(value))
+    prices = _extract_prices(raw)
     if len(prices) != 1:
         return None, '알림의 판매가격이 없거나 여러 가격으로 모호함'
     if re.search(r'판매\s*완료|거래\s*완료|예약\s*중', raw):
         return None, '예약/거래 완료 알림'
     if not re.search(r'판매\s*중|판매합니다|판매해요', raw):
         return None, '알림에서 판매 중 상태를 확인하지 못함'
-    urls = re.findall(r'https://www\.daangn\.com/kr/buy-sell/[^\s<>"\']+', raw)
-    url = ''
-    if urls:
-        parsed = urlsplit(urls[0].rstrip(').,'))
-        url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, '', ''))
+    url = _extract_listing_url(raw)
     title_lines = [line.strip() for line in raw.splitlines() if line.strip() and not line.startswith('https://')]
     # Retain all notification lines for accessory/model exclusions as well as matching.
     title = ' '.join(title_lines)[:1000]

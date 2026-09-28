@@ -76,6 +76,15 @@ def search_links(markup):
     return list(dict.fromkeys(clean for link in links if (clean := article_url(link))))
 
 
+def normalize_query(raw_query):
+    """Keep the AI-generated search query plain, bounded, and URL-free."""
+    query = re.sub(r'[^가-힣a-zA-Z0-9\s.-]', ' ', raw_query)
+    query = re.sub(r'\s+', ' ', query).strip()
+    if not 2 <= len(query) <= 100:
+        raise ValueError('포털 검색어 길이 오류')
+    return query
+
+
 class ArticleParser(HTMLParser):
     VOID = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'}
 
@@ -193,10 +202,7 @@ class PortalVerifier:
         query_data = json.loads(await ask(QUERY_PROMPT, {'title': analysis['title'], 'facts': analysis['facts']}, QUERY_SCHEMA))
         if not isinstance(query_data, dict) or not isinstance(query_data.get('query'), str):
             raise ValueError('포털 검색어 형식 오류')
-        query = re.sub(r'[^가-힣a-zA-Z0-9\s.-]', ' ', query_data['query'])
-        query = re.sub(r'\s+', ' ', query).strip()
-        if not 2 <= len(query) <= 100:
-            raise ValueError('포털 검색어 길이 오류')
+        query = normalize_query(query_data['query'])
         articles = await asyncio.wait_for(self.search(query), timeout=45)
         if not articles:
             return None, '최근 포털 기사 본문을 찾지 못함'
