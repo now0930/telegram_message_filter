@@ -23,6 +23,8 @@ KST = ZoneInfo('Asia/Seoul')
 LABELS = ('부도위험', '펀더멘털악화', '수급이슈', '외부매크로')
 MODEL = 'hf.co/sky7350/Mica-v0.1-4B:Q5_K_M'
 BASE = 'https://openapi.koreainvestment.com:9443'
+DEFAULT_WATCHLIST = 'bond_watchlist.json'
+DEFAULT_HISTORY_DB = 'bond_history.sqlite3'
 
 
 def number(value):
@@ -30,6 +32,38 @@ def number(value):
     if not result.is_finite():
         raise ValueError('Non-finite market value')
     return result
+
+
+def current_day():
+    """Return the Seoul calendar day used for daily retry bookkeeping."""
+    return datetime.now(KST).strftime('%Y%m%d')
+
+
+def load_watchlist(mock=False):
+    """Load the configured watchlist, or the deterministic mock item."""
+    if mock:
+        return [{'isin': 'MOCK', 'name': '예시회사채', 'issuer': '예시회사', 'rating': '테스트'}]
+    path = Path(os.getenv('BOND_WATCHLIST_PATH', DEFAULT_WATCHLIST))
+    return json.loads(path.read_text())
+
+
+def initialize_database(connection):
+    """Create the small set of tables used by the monitor."""
+    connection.execute(
+        'CREATE TABLE IF NOT EXISTS yields '
+        '(isin TEXT, day TEXT, value TEXT, PRIMARY KEY(isin,day))')
+    connection.execute(
+        'CREATE TABLE IF NOT EXISTS sent '
+        '(isin TEXT, day TEXT, PRIMARY KEY(isin,day))')
+    connection.execute(
+        'CREATE TABLE IF NOT EXISTS unavailable '
+        '(isin TEXT PRIMARY KEY, day TEXT, reason TEXT)')
+
+
+def alert_title(bond):
+    """Choose the user-facing title without changing the alert criteria."""
+    kind = '국채' if bond.get('bond_type') == 'government' else '회사채'
+    return f'[🚨 국내 {kind} 급락 감지]'
 
 
 def changes(price, previous, current_yield=None, previous_yield=None):
@@ -149,38 +183,28 @@ class BondMonitor:
         self.send, self.mock, self.dry_run = send, mock, dry_run
         self.kis = None if mock else KIS()
         self.ai = AsyncClient(host=os.getenv('OLLAMA_HOST', 'http://ollama:11434'), timeout=90)
-        self.db = sqlite3.connect(':memory:' if dry_run else os.getenv('BOND_DB_PATH', 'bond_history.sqlite3'))
-        self.db.execute('CREATE TABLE IF NOT EXISTS yields (isin TEXT, day TEXT, value TEXT, PRIMARY KEY(isin,day))')
-        self.db.execute('CREATE TABLE IF NOT EXISTS sent (isin TEXT, day TEXT, PRIMARY KEY(isin,day))')
-        self.db.execute('CREATE TABLE IF NOT EXISTS unavailable (isin TEXT PRIMARY KEY, day TEXT, reason TEXT)')
+        db_path = ':memory:' if dry_run else os.getenv('BOND_DB_PATH', DEFAULT_HISTORY_DB)
+        self.db = sqlite3.connect(db_path)
+        initialize_database(self.db)
         self.lock = asyncio.Lock()
 
     async def run_once(self):
         async with self.lock:
-            if self.mock:
-                bonds = [{'isin': 'MOCK', 'name': '예시회사채', 'issuer': '예시회사', 'rating': '테스트'}]
-            else:
-                bonds = json.loads(Path(os.getenv('BOND_WATCHLIST_PATH', 'bond_watchlist.json')).read_text())
+            bonds = load_watchlist(self.mock)
             skipped = 0
             failed = 0
-            day = datetime.now(KST).strftime('%Y%m%d')
+            day = current_day()
             for bond in bonds:
-                unavailable = self.db.execute(
-                    'SELECT day FROM unavailable WHERE isin=?', (bond.get('isin'),)).fetchone()
-                if unavailable and unavailable[0] == day:
+                if self._unavailable_today(bond['isin'], day):
                     skipped += 1
                     continue
                 try:
                     await self.process(bond)
-                    self.db.execute('DELETE FROM unavailable WHERE isin=?', (bond.get('isin'),))
-                    self.db.commit()
+                    self._clear_unavailable(bond['isin'])
                 except (ValueError, requests.RequestException) as exc:
                     # Illiquid/unsupported bonds are expected in a broad watchlist.
                     skipped += 1
-                    self.db.execute(
-                        'INSERT OR REPLACE INTO unavailable VALUES (?,?,?)',
-                        (bond.get('isin'), day, str(exc)[:300]))
-                    self.db.commit()
+                    self._mark_unavailable(bond['isin'], day, exc)
                 except Exception:
                     failed += 1
                     LOG.exception('회사채 처리 실패: %s', bond.get('isin', 'unknown'))
@@ -188,9 +212,24 @@ class BondMonitor:
                 LOG.info('채권 조회 완료: 전체 %d개, 건너뜀 %d개, 예기치 않은 실패 %d개',
                          len(bonds), skipped, failed)
 
+    def _unavailable_today(self, isin, day):
+        row = self.db.execute(
+            'SELECT day FROM unavailable WHERE isin=?', (isin,)).fetchone()
+        return bool(row and row[0] == day)
+
+    def _mark_unavailable(self, isin, day, error):
+        self.db.execute(
+            'INSERT OR REPLACE INTO unavailable VALUES (?,?,?)',
+            (isin, day, str(error)[:300]))
+        self.db.commit()
+
+    def _clear_unavailable(self, isin):
+        self.db.execute('DELETE FROM unavailable WHERE isin=?', (isin,))
+        self.db.commit()
+
     async def process(self, bond):
         if self.mock:
-            data = {'date': datetime.now(KST).strftime('%Y%m%d'), 'previous_date': 'MOCK',
+            data = {'date': current_day(), 'previous_date': 'MOCK',
                     'price': '9700', 'previous_price': '10000', 'yield': '5.1'}
             previous_yield = '4.5'
         else:
@@ -221,7 +260,7 @@ class BondMonitor:
             label = None
         bp_text = '전일 수익률 관측치 없음' if bp is None else f'수익률 {bp:+.1f}bp'
         message = ('[MOCK 테스트]\n' if self.mock else '') + (
-            f"[🚨 국내 {'국채' if bond.get('bond_type') == 'government' else '회사채'} 급락 감지]\n- 종목명: {bond['name']} (신용등급: {bond.get('rating', '미확인')})\n"
+            f"{alert_title(bond)}\n- 종목명: {bond['name']} (신용등급: {bond.get('rating', '미확인')})\n"
             f"- 비교일: {data['previous_date']} → {data['date']}\n"
             f"- 변동폭: 가격 {pct:+.2f}% ({bp_text})\n"
             f"- AI 분석 결과: ⚠️ {label or '분류 보류 (뉴스 부족 또는 AI 응답 오류)'}\n"
