@@ -72,8 +72,6 @@ cp .env.example .env
 
 `.env`는 이 흐름을 제어하는 설정 파일입니다. 아래 표에서 각 변수는 한 번만 설명합니다.
 
-| 묶음 | 주요 변수 | 역할 | 입력·저장 위치 |
-| --- | --- | --- | --- |
 | 묶음 | 변수 | 기능과 저장 위치 |
 | --- | --- | --- |
 | Telegram 연결 | `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TARGET_CHANNELS`, `DESTINATION_CHAT_ID` | 채널을 읽고 세 기능의 통과 알림을 목적지로 전송합니다. 세션은 `telegram_session.session`에 저장하며 Git에 올리지 않습니다. |
