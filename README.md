@@ -340,3 +340,12 @@ docker compose -f docker-compose.yml -f docker-compose.deals.yml up -d telegram-
 운영 .env의 OLLAMA_NUM_CTX는 기본 16384입니다. Ollama 요청에 num_ctx로 전달해
 기존 4096 컨텍스트 초과 오류를 줄입니다. 모델이나 서버가 이 크기를 지원해야 하며,
 토큰 초과를 완전히 방지하는 것은 아닙니다. 설정 변경 후 Compose를 재생성하세요.
+
+
+### 결과 채널 푸시 알림
+
+운영 .env에 TELEGRAM_BOT_TOKEN을 설정하면 뉴스·당근·채권 결과를 봇으로 전송합니다.
+수신은 기존 Userbot 세션을 사용합니다. 봇은 DESTINATION_CHAT_ID 채널의 관리자이며
+메시지 게시 권한이 있어야 합니다. 토큰이 없으면 기존 계정으로 전송합니다.
+봇 전송 실패 시 자동으로 본인 계정 전송으로 전환하지 않고 실패를 기록합니다.
+휴대폰의 결과 채널 알림과 Telegram 앱 알림 권한도 켜야 합니다.

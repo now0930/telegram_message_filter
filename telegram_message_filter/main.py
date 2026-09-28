@@ -57,7 +57,8 @@ async def handler(event):
         dest = int(DESTINATION_CHAT_ID) if DESTINATION_CHAT_ID.lstrip('-').isdigit() else DESTINATION_CHAT_ID
 
         async def send(brief):
-            return await telegram_client.send_message(dest, brief, parse_mode=None, link_preview=False)
+            from telegram_delivery import send_notification
+            return await send_notification(telegram_client, dest, brief)
 
         outcome = await news_filter.process(text, source, send,
                                             channel_username=username, channel_id=chat.id)
@@ -119,7 +120,8 @@ async def main(check_latest=False):
             from deal_bridge import DealBridge
 
             async def send_deal(message):
-                return await telegram_client.send_message(destination, message, parse_mode=None, link_preview=False)
+                from telegram_delivery import send_notification
+                return await send_notification(telegram_client, destination, message)
 
             deal_bridge = DealBridge(os.getenv('DEALS_CONFIG_PATH', 'deal_watchlist.json'),
                                      os.getenv('DEALS_DB_PATH', 'deal_notifications.sqlite3'),
@@ -129,7 +131,8 @@ async def main(check_latest=False):
             from bond_monitor import BondMonitor
 
             async def send_bond(message):
-                return await telegram_client.send_message(destination, message, parse_mode=None, link_preview=False)
+                from telegram_delivery import send_notification
+                return await send_notification(telegram_client, destination, message)
 
             bond_monitor = BondMonitor(send_bond)
             bond_scheduler = bond_monitor.start()
