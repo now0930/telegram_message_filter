@@ -25,10 +25,17 @@ class SelectionTests(unittest.TestCase):
         self.assertTrue(qualifies(analysis()))
         for changes in ({'topic': '기타'}, {'promotional': True}, {'importance': 3},
                         {'depth': 2}, {'evidence': 2}, {'facts': []}):
-            self.assertFalse(qualifies(analysis(**changes)))
+            self.assertFalse(qualifies(analysis(**changes), 4))
         self.assertTrue(qualifies(analysis(importance=5, depth=2, evidence=4)))
         self.assertFalse(qualifies(analysis(importance=5, depth=1, evidence=4)))
         self.assertFalse(qualifies(analysis(), 5))
+
+    def test_expanded_selection_keeps_evidence_and_ad_guards(self):
+        self.assertTrue(qualifies(analysis(importance=3, depth=2, evidence=3)))
+        for change in ({'importance': 2}, {'depth': 1}, {'evidence': 2},
+                       {'promotional': True}, {'topic': '기타'}, {'facts': []}):
+            self.assertFalse(qualifies(analysis(importance=3, depth=2, evidence=3) | change))
+        self.assertFalse(qualifies(analysis(importance=3, depth=2, evidence=3), 4))
 
     def test_invalid_json_scores_and_fields_fail_closed(self):
         for value in ('합격', '{}', json.dumps(analysis(importance=True)),

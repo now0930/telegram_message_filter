@@ -153,12 +153,12 @@ def validate_analysis(raw):
     return result
 
 
-def qualifies(result, minimum_importance=4):
+def qualifies(result, minimum_importance=3):
     return (
         result['topic'] != '기타' and not result['promotional'] and bool(result['facts'])
         and all(result[key].strip() for key in TEXT_FIELDS)
         and result['importance'] >= minimum_importance and result['evidence'] >= 3
-        and (result['depth'] >= 3 or
+        and ((minimum_importance == 3 and result['depth'] >= 2) or result['depth'] >= 3 or
              (result['importance'] == 5 and result['evidence'] >= 4 and result['depth'] >= 2))
     )
 
@@ -220,9 +220,9 @@ def render_brief(analysis, source, update=False, verification=None):
 
 
 class NewsFilter:
-    def __init__(self, ai, model, history, minimum_importance=4, portal_verifier=None):
-        if minimum_importance not in (4, 5):
-            raise ValueError('MIN_IMPORTANCE는 4 또는 5여야 합니다.')
+    def __init__(self, ai, model, history, minimum_importance=3, portal_verifier=None):
+        if minimum_importance not in (3, 4, 5):
+            raise ValueError('MIN_IMPORTANCE는 3, 4 또는 5여야 합니다.')
         self.ai, self.model, self.history = ai, model, history
         self.minimum_importance = minimum_importance
         self.portal_verifier = portal_verifier
