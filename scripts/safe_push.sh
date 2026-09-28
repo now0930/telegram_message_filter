@@ -45,6 +45,9 @@ changed_files="$(git diff --name-only "$upstream..HEAD")"
 while IFS= read -r path; do
   [[ -z "$path" ]] && continue
   case "$path" in
+    telegram_message_filter/.env.example)
+      # Tracked configuration template; real .env files remain blocked below.
+      ;;
     *.env|*.env.*|*.session|*.session-*|*.sqlite3|*.sqlite3-*|*.pem|*.key|*credentials*|*secret*)
       die "비밀 또는 런타임 파일이 커밋 범위에 있습니다: $path"
       ;;
