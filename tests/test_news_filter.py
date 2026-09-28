@@ -143,9 +143,22 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
                              self.filter.process('원문', 'b/2', self.sender))
         self.sender.assert_awaited_once()
 
+    async def test_link_body_used_and_source_preserved(self):
+        self.replies(analysis())
+        url = 'https://v.daum.net/v/20260927093939078'
+        self.filter.portal_verifier = SimpleNamespace(
+            linked_articles=AsyncMock(return_value=[dict(url=url, title='기사', body='실제 기사 본문')]),
+            requires=lambda *args: False)
+        await self.filter.process(url, 'telegram/1', self.sender)
+        payload = self.filter.ai.chat.call_args.kwargs['messages'][1]['content']
+        self.assertIn('실제 기사 본문', payload)
+        self.assertIn(url, self.sender.call_args.args[0])
+        self.assertEqual(self.history.recent()[0]['source'], 'telegram/1')
+        self.assertEqual(self.filter.ai.chat.call_args.kwargs['options']['num_ctx'], 16384)
+
     async def test_target_portal_mismatch_prevents_send_and_history(self):
         self.replies(analysis())
-        self.filter.portal_verifier = SimpleNamespace(requires=lambda *args: True,
+        self.filter.portal_verifier = SimpleNamespace(linked_articles=AsyncMock(return_value=[]), requires=lambda *args: True,
             verify=AsyncMock(return_value=(None, '불일치')))
         outcome = await self.filter.process('원문', 'a/1', self.sender, channel_username='best_article')
         self.assertIn('포털 대조 제외', outcome)
@@ -154,7 +167,7 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_portal_exception_cannot_send(self):
         self.replies(analysis())
-        self.filter.portal_verifier = SimpleNamespace(requires=lambda *args: True,
+        self.filter.portal_verifier = SimpleNamespace(linked_articles=AsyncMock(return_value=[]), requires=lambda *args: True,
             verify=AsyncMock(side_effect=TimeoutError()))
         with self.assertRaises(TimeoutError):
             await self.filter.process('원문', 'a/1', self.sender, channel_id=1030607534)
@@ -162,7 +175,7 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_other_channels_do_not_require_portal_search(self):
         self.replies(analysis())
-        verifier = SimpleNamespace(requires=lambda *args: False, verify=AsyncMock())
+        verifier = SimpleNamespace(linked_articles=AsyncMock(return_value=[]), requires=lambda *args: False, verify=AsyncMock())
         self.filter.portal_verifier = verifier
         await self.filter.process('원문', 'a/1', self.sender, channel_username='other')
         verifier.verify.assert_not_awaited()
@@ -171,7 +184,7 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
     async def test_verified_source_is_linked_and_persisted(self):
         self.replies(analysis())
         evidence = dict(url='https://v.daum.net/v/20260927093939078', title='포털 보도', reason='일치')
-        self.filter.portal_verifier = SimpleNamespace(requires=lambda *args: True,
+        self.filter.portal_verifier = SimpleNamespace(linked_articles=AsyncMock(return_value=[]), requires=lambda *args: True,
             verify=AsyncMock(return_value=(evidence, '일치')))
         await self.filter.process('원문', 'a/1', self.sender, channel_username='best_article')
         self.assertIn(evidence['url'], self.sender.call_args.args[0])

@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import re
 import sqlite3
 import time
@@ -231,7 +232,7 @@ class NewsFilter:
         response = await self.ai.chat(
             model=self.model, messages=[{'role': 'system', 'content': prompt},
                                        {'role': 'user', 'content': json.dumps(data, ensure_ascii=False)}],
-            options={'temperature': 0}, think=False, format=schema)
+            options={'temperature': 0, 'num_ctx': int(os.getenv('OLLAMA_NUM_CTX', '16384'))}, think=False, format=schema)
         return response['message']['content']
 
     async def analyze(self, text):
@@ -246,14 +247,22 @@ class NewsFilter:
             recent = self.history.recent()
             if any(row['fingerprint'] == fingerprint(text) for row in recent):
                 return '동일 본문 중복 제외'
-            result = await self.analyze(text)
+            analysis_text = text
+            linked = []
+            if self.portal_verifier:
+                linked = await self.portal_verifier.linked_articles(text)
+                for article in linked:
+                    analysis_text += (
+                        f"\n\n[링크 기사 자료: {article['url']}]\n"
+                        f"{article['title']}\n{article['body']}")
+            result = await self.analyze(analysis_text)
             scores = f"중요도={result['importance']} 깊이={result['depth']} 근거={result['evidence']}"
             if not qualifies(result, self.minimum_importance):
                 return f"선별 제외 ({scores}): {result['reason']}"
             verification = None
             if self.portal_verifier and self.portal_verifier.requires(channel_username, channel_id):
                 verification, reason = await asyncio.wait_for(
-                    self.portal_verifier.verify(text, result, self._ask), timeout=150)
+                    self.portal_verifier.verify(analysis_text, result, self._ask), timeout=150)
                 if not verification:
                     return f"포털 대조 제외: {reason}"
                 logger.info("포털 기사 대조 통과: %s", verification['url'])
@@ -270,6 +279,9 @@ class NewsFilter:
                     if not match['material_update']:
                         return f"같은 사건 중복 제외: {match['reason']}"
                     update = True
-            sent = await send(render_brief(result, source, update, verification))
+            brief = render_brief(result, source, update, verification)
+            if linked:
+                brief += '\n\n참고 기사:\n' + '\n'.join(article['url'] for article in linked)
+            sent = await send(brief)
             self.history.remember(text, result, source, sent.id, verification)
             return f"전송 완료: destination_id={sent.id} ({scores})"

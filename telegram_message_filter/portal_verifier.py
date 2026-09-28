@@ -198,6 +198,21 @@ class PortalVerifier:
             articles = await asyncio.gather(*(read(url) for url in urls))
             return [dict(article, id=index + 1) for index, article in enumerate(a for a in articles if a)]
 
+    async def linked_articles(self, text):
+        """Read up to two supported article links without following redirects."""
+        urls = search_links(text)[:2]
+        async with httpx.AsyncClient(timeout=12, follow_redirects=False) as client:
+            articles = []
+            for url in urls:
+                try:
+                    markup = await asyncio.wait_for(self._html(client, url), timeout=15)
+                    article = parse_article(markup, url, self.max_age_days)
+                    if article:
+                        articles.append(article)
+                except (httpx.HTTPError, ValueError, TimeoutError):
+                    logger.warning('게시글 링크 본문 읽기 실패: %s', url)
+            return articles
+
     async def verify(self, text, analysis, ask):
         query_data = json.loads(await ask(QUERY_PROMPT, {'title': analysis['title'], 'facts': analysis['facts']}, QUERY_SCHEMA))
         if not isinstance(query_data, dict) or not isinstance(query_data.get('query'), str):
