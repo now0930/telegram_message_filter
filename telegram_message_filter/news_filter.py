@@ -257,6 +257,15 @@ class NewsFilter:
                         f"{article['title']}\n{article['body']}")
             result = await self.analyze(analysis_text)
             scores = f"중요도={result['importance']} 깊이={result['depth']} 근거={result['evidence']}"
+            strict_channel = (
+                (channel_username or '').lstrip('@').casefold() == 'darthacking'
+                or channel_id in (1066938528, -1001066938528)
+            )
+            if strict_channel and (
+                result['importance'] < max(4, self.minimum_importance)
+                or result['depth'] < 3 or result['evidence'] < 4
+            ):
+                return f"채널 엄격 기준 제외 (@darthacking, {scores}): {result['reason']}"
             if not qualifies(result, self.minimum_importance):
                 return f"선별 제외 ({scores}): {result['reason']}"
             verification = None

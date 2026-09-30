@@ -172,6 +172,21 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
         self.sender.assert_not_awaited()
         self.assertEqual(len(self.history.recent()), 0)
 
+    async def test_darthacking_rejects_shallow_or_weakly_sourced_news(self):
+        for overrides in ({'importance': 3}, {'depth': 2}, {'evidence': 3}):
+            self.replies(analysis(**overrides))
+            outcome = await self.filter.process('원문', 'a/1', self.sender,
+                                               channel_id=1066938528)
+            self.assertIn('채널 엄격 기준 제외', outcome)
+        self.sender.assert_not_awaited()
+        self.assertEqual(len(self.history.recent()), 0)
+
+    async def test_darthacking_accepts_substantial_sourced_news(self):
+        self.replies(analysis(importance=4, depth=3, evidence=4))
+        await self.filter.process('원문', 'a/1', self.sender,
+                                  channel_username='@Darthacking')
+        self.sender.assert_awaited_once()
+
     async def test_portal_exception_cannot_send(self):
         self.replies(analysis())
         self.filter.portal_verifier = SimpleNamespace(linked_articles=AsyncMock(return_value=[]), requires=lambda *args: True,
