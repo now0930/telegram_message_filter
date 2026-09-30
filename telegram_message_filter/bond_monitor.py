@@ -76,43 +76,68 @@ def changes(price, previous, current_yield=None, previous_yield=None):
     return pct, bp, pct <= -2 or (bp is not None and bp >= 50)
 
 
+class NoTradingHistory(ValueError):
+    """An empty history may be checked once a day."""
+
+
+class DataNotReady(ValueError):
+    """Intraday data can become available on the next scheduled run."""
+
+
+class KISRequestError(RuntimeError):
+    """Account/server failures must never blacklist an individual bond."""
+
+
 class KIS:
     def __init__(self):
         self.key = os.environ['KIS_APP_KEY']
         self.secret = os.environ['KIS_APP_SECRET']
         self.token, self.expires = '', 0
+        self.last_request = 0.0
 
     def get(self, endpoint, transaction, isin):
         if time.time() >= self.expires:
             response = requests.post(BASE + '/oauth2/tokenP', json={
                 'grant_type': 'client_credentials', 'appkey': self.key,
                 'appsecret': self.secret}, timeout=20)
-            response.raise_for_status()
             data = response.json()
+            if response.status_code != 200 or not data.get('access_token'):
+                raise KISRequestError('KIS token error: ' + str(data.get('error_code', response.status_code)))
             self.token = data['access_token']
             self.expires = time.time() + int(data['expires_in']) - 120
-        response = requests.get(BASE + '/uapi/domestic-bond/v1/quotations/' + endpoint,
-            headers={'authorization': 'Bearer ' + self.token, 'appkey': self.key,
-                     'appsecret': self.secret, 'tr_id': transaction, 'custtype': 'P'},
-            params={'FID_COND_MRKT_DIV_CODE': 'B', 'FID_INPUT_ISCD': isin}, timeout=20)
-        response.raise_for_status()
-        data = response.json()
-        if data.get('rt_cd') != '0':
-            raise RuntimeError('KIS rejected request: ' + str(data.get('msg_cd')))
-        return data['output']
+        for attempt in range(3):
+            time.sleep(max(0, 0.5 - (time.monotonic() - self.last_request)))
+            self.last_request = time.monotonic()
+            response = requests.get(BASE + '/uapi/domestic-bond/v1/quotations/' + endpoint,
+                headers={'authorization': 'Bearer ' + self.token, 'appkey': self.key,
+                         'appsecret': self.secret, 'tr_id': transaction, 'custtype': 'P'},
+                params={'FID_COND_MRKT_DIV_CODE': 'B', 'FID_INPUT_ISCD': isin}, timeout=20)
+            try:
+                data = response.json()
+            except ValueError:
+                data = {}
+            if response.status_code == 200 and data.get('rt_cd') == '0':
+                return data['output']
+            code = str(data.get('msg_cd', response.status_code))
+            if attempt < 2 and (response.status_code >= 500 or response.status_code == 429):
+                time.sleep(2 ** (attempt + 1))
+                continue
+            raise KISRequestError('KIS quotation error: ' + code)
 
     def collect(self, isin):
         rows = self.get('inquire-daily-itemchartprice', 'FHKBJ773701C0', isin)
         if not isinstance(rows, list):
             raise ValueError('Unexpected KIS daily schema')
+        if not rows:
+            raise NoTradingHistory('EMPTY_HISTORY')
         rows = sorted(rows, key=lambda row: row['stck_bsop_date'], reverse=True)
         if len(rows) < 2 or rows[0]['stck_bsop_date'] == rows[1]['stck_bsop_date']:
-            raise ValueError('Need two distinct trading dates')
+            raise DataNotReady('Need two distinct trading dates')
         today = datetime.now(KST).strftime('%Y%m%d')
         if rows[0]['stck_bsop_date'] != today:
-            raise ValueError('No current trading-day data (holiday/stale data)')
+            raise DataNotReady('No current trading-day data (holiday/stale data)')
         if any(number(row['acml_vol']) <= 0 for row in rows[:2]):
-            raise ValueError('No trades on one of the comparison dates')
+            raise DataNotReady('No trades on one of the comparison dates')
         time.sleep(.15)
         quote = self.get('inquire-price', 'FHKBJ773400C0', isin)
         if isinstance(quote, list):
@@ -193,6 +218,10 @@ class BondMonitor:
             bonds = load_watchlist(self.mock)
             skipped = 0
             failed = 0
+            checked = 0
+            deferred = 0
+            consecutive_errors = 0
+            reasons = {}
             day = current_day()
             for bond in bonds:
                 if self._unavailable_today(bond['isin'], day):
@@ -201,21 +230,38 @@ class BondMonitor:
                 try:
                     await self.process(bond)
                     self._clear_unavailable(bond['isin'])
-                except (ValueError, requests.RequestException) as exc:
-                    # Illiquid/unsupported bonds are expected in a broad watchlist.
+                    checked += 1
+                    consecutive_errors = 0
+                except NoTradingHistory as exc:
                     skipped += 1
                     self._mark_unavailable(bond['isin'], day, exc)
+                    consecutive_errors = 0
+                except DataNotReady as exc:
+                    deferred += 1
+                    reasons[str(exc)] = reasons.get(str(exc), 0) + 1
+                    consecutive_errors = 0
+                except (KISRequestError, requests.RequestException) as exc:
+                    failed += 1
+                    consecutive_errors += 1
+                    # Log only a safe error code/type, never request headers or URLs.
+                    reason = str(exc) if isinstance(exc, KISRequestError) else type(exc).__name__
+                    reasons[reason] = reasons.get(reason, 0) + 1
+                    if consecutive_errors >= 3:
+                        LOG.warning('채권 조회 중단: 연속 API 오류 3회; 다음 예약 실행에서 재시도')
+                        break
                 except Exception:
                     failed += 1
                     LOG.exception('회사채 처리 실패: %s', bond.get('isin', 'unknown'))
-            if skipped or failed:
-                LOG.info('채권 조회 완료: 전체 %d개, 건너뜀 %d개, 예기치 않은 실패 %d개',
-                         len(bonds), skipped, failed)
+            LOG.info('채권 조회 결과: 전체 %d, 비교 완료 %d, 일일 제외 %d, 데이터 대기 %d, 실패 %d, 미처리 %d; 사유=%s',
+                     len(bonds), checked, skipped, deferred, failed,
+                     len(bonds) - checked - skipped - deferred - failed, reasons)
 
     def _unavailable_today(self, isin, day):
         row = self.db.execute(
-            'SELECT day FROM unavailable WHERE isin=?', (isin,)).fetchone()
-        return bool(row and row[0] == day)
+            'SELECT day, reason FROM unavailable WHERE isin=?', (isin,)).fetchone()
+        # Old versions cached HTTP errors and pre-market data gaps for a whole day.
+        # Ignore those legacy records without deleting yield/delivery history.
+        return bool(row and row[0] == day and row[1] == 'EMPTY_HISTORY')
 
     def _mark_unavailable(self, isin, day, error):
         self.db.execute(

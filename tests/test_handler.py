@@ -1,15 +1,22 @@
 import ast
 import logging
+import os
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 source = Path(__file__).parents[1] / 'telegram_message_filter' / 'main.py'
 handler = next(n for n in ast.parse(source.read_text()).body
                if isinstance(n, ast.AsyncFunctionDef) and n.name == 'handler')
 
 class HandlerTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # Tests must never inherit the running service's real bot credentials.
+        environment = patch.dict(os.environ, TELEGRAM_BOT_TOKEN='')
+        environment.start()
+        self.addCleanup(environment.stop)
+
     def setup_handler(self):
         client = SimpleNamespace(send_message=AsyncMock(return_value=SimpleNamespace(id=42)))
         async def process(text, source, send, **kwargs):

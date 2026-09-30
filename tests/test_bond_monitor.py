@@ -8,10 +8,45 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 sys.path.insert(0, str(Path(__file__).parents[1] / 'telegram_message_filter'))
-from bond_monitor import changes, classify, parse_news, BondMonitor, KIS, KST
+from bond_monitor import changes, classify, parse_news, BondMonitor, KIS, KST, NoTradingHistory, DataNotReady, KISRequestError
 
 
 class BondTests(unittest.IsolatedAsyncioTestCase):
+    async def test_only_empty_history_is_cached_and_legacy_errors_are_ignored(self):
+        monitor = BondMonitor(None, mock=True, dry_run=True)
+        try:
+            for error in (DataNotReady('waiting'), KISRequestError('server'), ValueError('schema')):
+                monitor._mark_unavailable('MOCK', '20260930', error)
+                self.assertFalse(monitor._unavailable_today('MOCK', '20260930'))
+            with patch.object(monitor, 'process', AsyncMock(side_effect=NoTradingHistory('EMPTY_HISTORY'))) as process:
+                await monitor.run_once()
+                await monitor.run_once()
+                self.assertEqual(process.await_count, 1)
+            self.assertFalse(monitor._unavailable_today('MOCK', '20990101'))
+        finally:
+            monitor.db.close()
+
+    async def test_intraday_data_retries_without_daily_blacklist(self):
+        monitor = BondMonitor(None, mock=True, dry_run=True)
+        try:
+            with patch.object(monitor, 'process', AsyncMock(side_effect=[DataNotReady('waiting'), None])) as process:
+                await monitor.run_once()
+                await monitor.run_once()
+                self.assertEqual(process.await_count, 2)
+            self.assertEqual(monitor.db.execute('SELECT count(*) FROM unavailable').fetchone()[0], 0)
+        finally:
+            monitor.db.close()
+
+    async def test_account_errors_stop_run_without_caching_bonds(self):
+        monitor = BondMonitor(None, mock=True, dry_run=True)
+        try:
+            with patch('bond_monitor.load_watchlist', return_value=[{'isin': str(i)} for i in range(10)]), patch.object(monitor, 'process', AsyncMock(side_effect=KISRequestError('rate limit'))) as process:
+                await monitor.run_once()
+                self.assertEqual(process.await_count, 3)
+            self.assertEqual(monitor.db.execute('SELECT count(*) FROM unavailable').fetchone()[0], 0)
+        finally:
+            monitor.db.close()
+
     def test_exact_boundaries_and_units(self):
         self.assertTrue(changes(9800, 10000)[2])
         self.assertFalse(changes(9801, 10000, '4.999', '4.5')[2])
